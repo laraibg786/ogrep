@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # goreleaser needs full git history and tags to compute the
           # version and diff against the previous tag, even though this
@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -33,7 +33,7 @@ jobs:
         run: go test -race ./...
 
       - name: Run goreleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           # Track the goreleaser v2 line without pinning an exact patch.
           version: "~> v2"
