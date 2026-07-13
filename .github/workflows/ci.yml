@@ -37,28 +37,24 @@ jobs:
       - name: go test -race
         run: go test -race ./...
 
-  cross-platform-build:
-    name: Build sanity (${{ matrix.os }})
-    # Build-only, not the full lint/test/race suite: this project
-    # cross-compiles release binaries for linux/darwin/windows via
-    # goreleaser, so a Windows- or macOS-specific compile break would
-    # otherwise go unnoticed until release time. The race detector and
-    # the rest of the test suite stay ubuntu-only (fastest, and the
-    # most consistently supported platform for -race) so this matrix
-    # job stays cheap and CI stays fast overall.
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: go build
-        run: go build ./...
+      - name: Cross-compile sanity check
+        # This project cross-compiles release binaries for
+        # linux/darwin/windows (amd64/arm64) via goreleaser, so a
+        # platform-specific compile break is worth catching before
+        # release time. Go's cross-compiler makes this a non-issue to
+        # check cheaply: CGO_ENABLED=0 + GOOS/GOARCH lets one ubuntu
+        # runner compile for every target without ever booting an
+        # actual macOS/Windows VM, which would burn CI minutes at
+        # GitHub's higher per-minute multiplier for those runners for
+        # no real benefit — go build's cross-compiler output is the
+        # same regardless of host OS.
+        run: |
+          set -e
+          for platform in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
+            goos="${platform%/*}"
+            goarch="${platform#*/}"
+            echo "Building for $goos/$goarch..."
+            out="/tmp/ogrep-$goos-$goarch"
+            [ "$goos" = "windows" ] && out="$out.exe"
+            CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" go build -o "$out" ./cmd/ogrep
+          done
