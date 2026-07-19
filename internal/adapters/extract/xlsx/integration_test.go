@@ -62,14 +62,14 @@ func TestIntegrationOrchestratorFindsXlsxMatches(t *testing.T) {
 	}
 
 	m := sink.matches[0]
-	if m.Location.Human != "Budget 2024!B45" {
-		t.Errorf("Location.Human = %q, want %q", m.Location.Human, "Budget 2024!B45")
+	if m.Location.Human() != "Budget 2024!B45" {
+		t.Errorf("Location.Human() = %q, want %q", m.Location.Human(), "Budget 2024!B45")
 	}
-	if m.Location.Path != path {
-		t.Errorf("Location.Path = %q, want %q", m.Location.Path, path)
+	if m.Path != path {
+		t.Errorf("Path = %q, want %q", m.Path, path)
 	}
-	if m.Location.Format != "xlsx" {
-		t.Errorf("Location.Format = %q, want %q", m.Location.Format, "xlsx")
+	if m.Format != "xlsx" {
+		t.Errorf("Format = %q, want %q", m.Format, "xlsx")
 	}
 }
 
@@ -102,7 +102,7 @@ func TestIntegrationOrchestratorRegexAcrossSheets(t *testing.T) {
 
 	var humans []string
 	for _, m := range sink.matches {
-		humans = append(humans, m.Location.Human)
+		humans = append(humans, m.Location.Human())
 	}
 	wantSet := map[string]bool{"Sheet1!A1": true, "Budget 2024!C1": true}
 	for _, h := range humans {

@@ -57,6 +57,15 @@ func busyWork(n int) int {
 	return x
 }
 
+// fakeLineLocation is a minimal domain.Location for workExtractor's
+// synthetic units.
+type fakeLineLocation struct {
+	line int
+}
+
+func (l fakeLineLocation) Human() string          { return fmt.Sprintf("line %d", l.line) }
+func (l fakeLineLocation) Fields() map[string]any { return map[string]any{"line": l.line} }
+
 // workExtractor is a ports.DocumentExtractor whose Extract emits
 // unitsPerFile TextUnits, each preceded by a small busyWork call so the
 // benchmark's total CPU cost is controllable independent of real
@@ -101,13 +110,9 @@ func (e workExtractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) 
 				text += " needle"
 			}
 			u := domain.TextUnit{
-				Kind: domain.UnitPlainLine,
-				Location: domain.Location{
-					Format: "fake",
-					Line:   i,
-					Human:  fmt.Sprintf("line %d", i),
-				},
-				Text: text,
+				Kind:     domain.UnitPlainLine,
+				Location: fakeLineLocation{line: i},
+				Text:     text,
 			}
 			select {
 			case units <- u:

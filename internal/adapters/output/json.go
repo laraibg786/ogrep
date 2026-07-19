@@ -29,28 +29,11 @@ type jsonSpan struct {
 	End   int `json:"end"`
 }
 
-// jsonMatch is the on-the-wire shape of one JSON-lines record.
-type jsonMatch struct {
-	Type   string `json:"type"`
-	Path   string `json:"path"`
-	Format string `json:"format"`
-	Human  string `json:"location"`
-
-	Sheet     string `json:"sheet,omitempty"`
-	Cell      string `json:"cell,omitempty"`
-	Slide     int    `json:"slide,omitempty"`
-	Shape     string `json:"shape,omitempty"`
-	Paragraph int    `json:"paragraph,omitempty"`
-	Table     int    `json:"table,omitempty"`
-	Row       int    `json:"row,omitempty"`
-	Col       int    `json:"col,omitempty"`
-	Line      int    `json:"line,omitempty"`
-
-	Text  string     `json:"text"`
-	Spans []jsonSpan `json:"spans"`
-}
-
-// WriteMatch implements ports.OutputSink.
+// WriteMatch implements ports.OutputSink. The record's fixed fields
+// (type/path/format/location/text/spans) are always present; the
+// remaining keys are format-specific and come entirely from
+// m.Location.Fields(), so this sink never needs to know what those keys
+// are for any given format.
 func (j *JSON) WriteMatch(m domain.Match) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -60,22 +43,16 @@ func (j *JSON) WriteMatch(m domain.Match) error {
 		spans[i] = jsonSpan{Start: s.Start, End: s.End}
 	}
 
-	rec := jsonMatch{
-		Type:      "match",
-		Path:      m.Location.Path,
-		Format:    m.Location.Format,
-		Human:     m.Location.Human,
-		Sheet:     m.Location.Sheet,
-		Cell:      m.Location.Cell,
-		Slide:     m.Location.Slide,
-		Shape:     m.Location.Shape,
-		Paragraph: m.Location.Paragraph,
-		Table:     m.Location.Table,
-		Row:       m.Location.Row,
-		Col:       m.Location.Col,
-		Line:      m.Location.Line,
-		Text:      m.Text,
-		Spans:     spans,
+	rec := map[string]any{
+		"type":     "match",
+		"path":     m.Path,
+		"format":   m.Format,
+		"location": m.Location.Human(),
+		"text":     m.Text,
+		"spans":    spans,
+	}
+	for k, v := range m.Location.Fields() {
+		rec[k] = v
 	}
 	return j.enc.Encode(rec)
 }

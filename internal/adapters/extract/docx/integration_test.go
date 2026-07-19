@@ -121,13 +121,13 @@ func TestDocxThroughRealOrchestrator(t *testing.T) {
 
 	var humans []string
 	for _, m := range sink.matches {
-		if m.Location.Format != "docx" {
-			t.Errorf("match Location.Format = %q, want docx", m.Location.Format)
+		if m.Format != "docx" {
+			t.Errorf("match Format = %q, want docx", m.Format)
 		}
-		if m.Location.Path != path {
-			t.Errorf("match Location.Path = %q, want %q", m.Location.Path, path)
+		if m.Path != path {
+			t.Errorf("match Path = %q, want %q", m.Path, path)
 		}
-		humans = append(humans, m.Location.Human)
+		humans = append(humans, m.Location.Human())
 	}
 	sort.Strings(humans)
 

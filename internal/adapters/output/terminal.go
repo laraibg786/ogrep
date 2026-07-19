@@ -58,7 +58,7 @@ func (t *Terminal) WriteMatch(m domain.Match) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	loc := m.Location.String()
+	loc := domain.LocationString(m.Path, m.Location)
 	if t.color {
 		fmt.Fprintf(t.w, "%s%s%s\n", ansiPathColor, loc, ansiReset)
 	} else {

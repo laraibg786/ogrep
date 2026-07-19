@@ -29,6 +29,35 @@ func (s shapeCtx) displayName() string {
 	return fmt.Sprintf("Shape %d", s.ordinal)
 }
 
+// shapeLocation implements domain.Location for text found within a
+// named shape on a slide.
+type shapeLocation struct {
+	Slide int
+	Shape string
+}
+
+func (l shapeLocation) Human() string {
+	return fmt.Sprintf("Slide %d (Shape %q)", l.Slide, l.Shape)
+}
+
+func (l shapeLocation) Fields() map[string]any {
+	return map[string]any{"slide": l.Slide, "shape": l.Shape}
+}
+
+// notesLocation implements domain.Location for text found in a slide's
+// speaker notes.
+type notesLocation struct {
+	Slide int
+}
+
+func (l notesLocation) Human() string {
+	return fmt.Sprintf("Slide %d (Notes)", l.Slide)
+}
+
+func (l notesLocation) Fields() map[string]any {
+	return map[string]any{"slide": l.Slide}
+}
+
 // paragraphEmitter is invoked once per completed paragraph (on the
 // <a:p> closing tag) with the name of its enclosing shape and the
 // paragraph's concatenated text (all <a:t> runs within it, in document
@@ -142,18 +171,9 @@ func streamPart(ctx context.Context, units chan<- domain.TextUnit, f *zip.File, 
 		var loc domain.Location
 		switch kind {
 		case domain.UnitSlideNotes:
-			loc = domain.Location{
-				Format: "pptx",
-				Slide:  slideNum,
-				Human:  fmt.Sprintf("Slide %d (Notes)", slideNum),
-			}
+			loc = notesLocation{Slide: slideNum}
 		default: // domain.UnitSlideShape
-			loc = domain.Location{
-				Format: "pptx",
-				Slide:  slideNum,
-				Shape:  shapeName,
-				Human:  fmt.Sprintf("Slide %d (Shape %q)", slideNum, shapeName),
-			}
+			loc = shapeLocation{Slide: slideNum, Shape: shapeName}
 		}
 
 		unit := domain.TextUnit{Kind: kind, Location: loc, Text: text}

@@ -6,8 +6,6 @@
 // sinks — keep them free of any adapter-specific logic.
 package domain
 
-import "fmt"
-
 // UnitKind identifies the kind of document construct a TextUnit was
 // extracted from. Extractors should pick the most specific kind that
 // applies; the text plugin uses UnitPlainLine.
@@ -52,39 +50,22 @@ func (k UnitKind) String() string {
 	}
 }
 
-// Location describes where a TextUnit or Match came from within a file.
-// Not every field applies to every format: a docx paragraph will set
-// Paragraph, an xlsx cell will set Sheet/Cell, a pptx shape will set
-// Slide/Shape, and the plain text plugin will set Line. Human is a
-// pre-rendered, format-appropriate description (e.g. `Slide 12 (Shape
-// "Title")`, `Sheet1!B45`, `Paragraph 88`, `line 42`) that output sinks
-// can print directly without needing to know per-format formatting
-// rules.
-type Location struct {
-	Format string // "docx", "pptx", "xlsx", "text"
-	Path   string
-	Human  string // pre-rendered human-readable location
+// Location describes where within a file a TextUnit or Match came from.
+// It is implemented by each extraction plugin (docx/pptx/xlsx/text), not
+// by core: a docx paragraph location knows about paragraph numbers, an
+// xlsx cell location knows about sheet/cell references, and so on. Core
+// only ever calls Human and Fields, so adding a new format's location
+// shape never requires changing domain, the orchestrator, or the output
+// sinks.
+type Location interface {
+	// Human returns a pre-rendered, format-appropriate description (e.g.
+	// `Slide 12 (Shape "Title")`, `Sheet1!B45`, `Paragraph 88`, `line
+	// 42`) that output sinks can print directly.
+	Human() string
 
-	Sheet string
-	Cell  string
-
-	Slide int
-	Shape string
-
-	Paragraph int
-
-	Table, Row, Col int
-
-	Line int // text plugin
-}
-
-// String renders the location as "path:Human", matching the conventional
-// grep-style "file:location" prefix used in terminal output.
-func (l Location) String() string {
-	if l.Human == "" {
-		return l.Path
-	}
-	return fmt.Sprintf("%s:%s", l.Path, l.Human)
+	// Fields returns format-specific structured data for machine-readable
+	// output (e.g. JSON), keyed by field name (e.g. "slide", "shape").
+	Fields() map[string]any
 }
 
 // Span is a byte-offset range [Start, End) into the Text of the TextUnit
@@ -104,11 +85,26 @@ type TextUnit struct {
 }
 
 // Match is a single matched TextUnit, carrying the byte-offset Spans (in
-// Text) that the matcher found.
+// Text) that the matcher found. Path and Format are set by the
+// orchestrator (which is the only layer that knows the file path and
+// which extractor produced the unit); Location is carried over from the
+// originating TextUnit unchanged.
 type Match struct {
+	Path     string
+	Format   string
 	Location Location
 	Text     string
 	Spans    []Span
+}
+
+// LocationString renders a "path:Human" location string, matching the
+// conventional grep-style "file:location" prefix used in terminal output.
+func LocationString(path string, loc Location) string {
+	human := loc.Human()
+	if human == "" {
+		return path
+	}
+	return path + ":" + human
 }
 
 // SearchOptions carries all user-facing search configuration. Not every

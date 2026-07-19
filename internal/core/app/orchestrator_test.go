@@ -88,12 +88,12 @@ func TestOrchestratorEndToEndSearch(t *testing.T) {
 
 	var gotPaths []string
 	for _, m := range sink.matches {
-		gotPaths = append(gotPaths, filepath.Base(m.Location.Path))
-		if m.Location.Format != "text" {
-			t.Errorf("match location format = %q, want %q", m.Location.Format, "text")
+		gotPaths = append(gotPaths, filepath.Base(m.Path))
+		if m.Format != "text" {
+			t.Errorf("match format = %q, want %q", m.Format, "text")
 		}
-		if m.Location.Path == "" {
-			t.Error("expected orchestrator to fill in Location.Path")
+		if m.Path == "" {
+			t.Error("expected orchestrator to fill in Match.Path")
 		}
 	}
 	sort.Strings(gotPaths)
@@ -201,12 +201,12 @@ func TestOrchestratorConcurrentFilesNotInterleaved(t *testing.T) {
 	seen := make(map[string]bool)
 	var lastPath string
 	for _, m := range sink.matches {
-		if m.Location.Path != lastPath {
-			if seen[m.Location.Path] {
-				t.Fatalf("file %s's matches were interleaved with another file's", m.Location.Path)
+		if m.Path != lastPath {
+			if seen[m.Path] {
+				t.Fatalf("file %s's matches were interleaved with another file's", m.Path)
 			}
-			seen[m.Location.Path] = true
-			lastPath = m.Location.Path
+			seen[m.Path] = true
+			lastPath = m.Path
 		}
 	}
 }
@@ -282,7 +282,7 @@ func TestOrchestratorContextLines(t *testing.T) {
 	var gotLines []int
 	var gotHasSpans []bool
 	for _, m := range sink.matches {
-		gotLines = append(gotLines, m.Location.Line)
+		gotLines = append(gotLines, m.Location.Fields()["line"].(int))
 		gotHasSpans = append(gotHasSpans, len(m.Spans) > 0)
 	}
 
@@ -326,7 +326,7 @@ func TestOrchestratorContextLinesAfterOnly(t *testing.T) {
 
 	var gotLines []int
 	for _, m := range sink.matches {
-		gotLines = append(gotLines, m.Location.Line)
+		gotLines = append(gotLines, m.Location.Fields()["line"].(int))
 	}
 	want := []int{1, 2, 3}
 	if len(gotLines) != len(want) {

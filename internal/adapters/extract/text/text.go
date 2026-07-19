@@ -33,6 +33,18 @@ const maxLineSize = 1024 * 1024 // 1MiB
 // Extractor implements ports.DocumentExtractor for plain text files.
 type Extractor struct{}
 
+// lineLocation implements domain.Location for a single line of a plain
+// text file.
+type lineLocation struct {
+	Line int
+}
+
+func (l lineLocation) Human() string { return fmt.Sprintf("line %d", l.Line) }
+
+func (l lineLocation) Fields() map[string]any {
+	return map[string]any{"line": l.Line}
+}
+
 func init() {
 	registry.Default.Register(Extractor{})
 }
@@ -114,13 +126,9 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 			lineNo++
 			line := scanner.Text()
 			unit := domain.TextUnit{
-				Kind: domain.UnitPlainLine,
-				Location: domain.Location{
-					Format: "text",
-					Line:   lineNo,
-					Human:  fmt.Sprintf("line %d", lineNo),
-				},
-				Text: line,
+				Kind:     domain.UnitPlainLine,
+				Location: lineLocation{Line: lineNo},
+				Text:     line,
 			}
 			select {
 			case units <- unit:

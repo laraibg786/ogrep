@@ -114,11 +114,15 @@ func TestExtractSlideOrderFollowsSldIdLstNotFilenames(t *testing.T) {
 	}
 	for i, w := range want {
 		u := got[i]
-		if u.Location.Slide != w.slide {
-			t.Errorf("unit %d: Slide = %d, want %d", i, u.Location.Slide, w.slide)
+		loc, ok := u.Location.(shapeLocation)
+		if !ok {
+			t.Fatalf("unit %d location type = %T, want shapeLocation", i, u.Location)
 		}
-		if u.Location.Shape != w.shape {
-			t.Errorf("unit %d: Shape = %q, want %q", i, u.Location.Shape, w.shape)
+		if loc.Slide != w.slide {
+			t.Errorf("unit %d: Slide = %d, want %d", i, loc.Slide, w.slide)
+		}
+		if loc.Shape != w.shape {
+			t.Errorf("unit %d: Shape = %q, want %q", i, loc.Shape, w.shape)
 		}
 		if u.Text != w.text {
 			t.Errorf("unit %d: Text = %q, want %q", i, u.Text, w.text)
@@ -126,8 +130,8 @@ func TestExtractSlideOrderFollowsSldIdLstNotFilenames(t *testing.T) {
 	}
 
 	wantHuman3 := `Slide 3 (Shape "Content Placeholder 2")`
-	if got[2].Location.Human != wantHuman3 {
-		t.Errorf("Location.Human = %q, want %q", got[2].Location.Human, wantHuman3)
+	if got[2].Location.Human() != wantHuman3 {
+		t.Errorf("Location.Human() = %q, want %q", got[2].Location.Human(), wantHuman3)
 	}
 }
 
@@ -150,8 +154,12 @@ func TestExtractUnnamedShapeFallsBackToOrdinal(t *testing.T) {
 	if len(units) != 2 {
 		t.Fatalf("got %d units, want 2: %+v", len(units), units)
 	}
-	if units[1].Location.Shape != "Shape 2" {
-		t.Errorf("unnamed shape's Location.Shape = %q, want %q", units[1].Location.Shape, "Shape 2")
+	loc, ok := units[1].Location.(shapeLocation)
+	if !ok {
+		t.Fatalf("unit 1 location type = %T, want shapeLocation", units[1].Location)
+	}
+	if loc.Shape != "Shape 2" {
+		t.Errorf("unnamed shape's Shape = %q, want %q", loc.Shape, "Shape 2")
 	}
 }
 
@@ -198,12 +206,16 @@ func TestExtractNotesAssociatedViaSlideRels(t *testing.T) {
 	if note.Text != "speaker notes text" {
 		t.Errorf("notes Text = %q, want %q", note.Text, "speaker notes text")
 	}
-	if note.Location.Slide != 1 {
-		t.Errorf("notes Location.Slide = %d, want 1 (the slide's presentation-order position)", note.Location.Slide)
+	noteLoc, ok := note.Location.(notesLocation)
+	if !ok {
+		t.Fatalf("notes location type = %T, want notesLocation", note.Location)
+	}
+	if noteLoc.Slide != 1 {
+		t.Errorf("notes Location.Slide = %d, want 1 (the slide's presentation-order position)", noteLoc.Slide)
 	}
 	wantHuman := "Slide 1 (Notes)"
-	if note.Location.Human != wantHuman {
-		t.Errorf("notes Location.Human = %q, want %q", note.Location.Human, wantHuman)
+	if note.Location.Human() != wantHuman {
+		t.Errorf("notes Location.Human() = %q, want %q", note.Location.Human(), wantHuman)
 	}
 }
 
@@ -230,8 +242,12 @@ func TestExtractMultipleParagraphsInOneShape(t *testing.T) {
 		if units[i].Text != w {
 			t.Errorf("unit %d Text = %q, want %q", i, units[i].Text, w)
 		}
-		if units[i].Location.Shape != "Body" {
-			t.Errorf("unit %d Shape = %q, want %q", i, units[i].Location.Shape, "Body")
+		loc, ok := units[i].Location.(shapeLocation)
+		if !ok {
+			t.Fatalf("unit %d location type = %T, want shapeLocation", i, units[i].Location)
+		}
+		if loc.Shape != "Body" {
+			t.Errorf("unit %d Shape = %q, want %q", i, loc.Shape, "Body")
 		}
 	}
 }

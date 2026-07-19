@@ -126,14 +126,15 @@ func TestExtractMultipleParagraphs(t *testing.T) {
 			t.Errorf("unit %d text = %q, want %q", i, u.Text, wantTexts[i])
 		}
 		wantHuman := "Paragraph " + string(rune('1'+i))
-		if u.Location.Human != wantHuman {
-			t.Errorf("unit %d Human = %q, want %q", i, u.Location.Human, wantHuman)
+		if u.Location.Human() != wantHuman {
+			t.Errorf("unit %d Human() = %q, want %q", i, u.Location.Human(), wantHuman)
 		}
-		if u.Location.Paragraph != i+1 {
-			t.Errorf("unit %d Paragraph = %d, want %d", i, u.Location.Paragraph, i+1)
+		loc, ok := u.Location.(paragraphLocation)
+		if !ok {
+			t.Fatalf("unit %d location type = %T, want paragraphLocation", i, u.Location)
 		}
-		if u.Location.Format != "docx" {
-			t.Errorf("unit %d Format = %q, want docx", i, u.Location.Format)
+		if loc.Paragraph != i+1 {
+			t.Errorf("unit %d Paragraph = %d, want %d", i, loc.Paragraph, i+1)
 		}
 	}
 }
@@ -169,10 +170,10 @@ func TestExtractTableNotDoubleCounted(t *testing.T) {
 	if len(paragraphs) != 2 {
 		t.Fatalf("got %d bare paragraphs, want 2: %+v", len(paragraphs), paragraphs)
 	}
-	if paragraphs[0].Text != "Before table" || paragraphs[0].Location.Paragraph != 1 {
+	if paragraphs[0].Text != "Before table" || paragraphs[0].Location.(paragraphLocation).Paragraph != 1 {
 		t.Errorf("paragraph 0 = %+v, want text 'Before table' Paragraph 1", paragraphs[0])
 	}
-	if paragraphs[1].Text != "After table" || paragraphs[1].Location.Paragraph != 2 {
+	if paragraphs[1].Text != "After table" || paragraphs[1].Location.(paragraphLocation).Paragraph != 2 {
 		t.Errorf("paragraph 1 = %+v, want text 'After table' Paragraph 2", paragraphs[1])
 	}
 
@@ -182,15 +183,15 @@ func TestExtractTableNotDoubleCounted(t *testing.T) {
 		t.Fatalf("got %d table cells, want 3: %+v", len(cells), cells)
 	}
 
-	wantCell := domain.Location{Format: "docx", Table: 1, Row: 1, Col: 1, Human: "Table 1, Row 1, Cell 1"}
+	wantCell := cellLocation{Table: 1, Row: 1, Col: 1}
 	if cells[0].Text != "R1C1" || cells[0].Location != wantCell {
 		t.Errorf("cell 0 = %+v, want text R1C1 loc %+v", cells[0], wantCell)
 	}
-	wantCell2 := domain.Location{Format: "docx", Table: 1, Row: 1, Col: 2, Human: "Table 1, Row 1, Cell 2"}
+	wantCell2 := cellLocation{Table: 1, Row: 1, Col: 2}
 	if cells[1].Text != "R1C2" || cells[1].Location != wantCell2 {
 		t.Errorf("cell 1 = %+v, want text R1C2 loc %+v", cells[1], wantCell2)
 	}
-	wantCell3 := domain.Location{Format: "docx", Table: 1, Row: 2, Col: 1, Human: "Table 1, Row 2, Cell 1"}
+	wantCell3 := cellLocation{Table: 1, Row: 2, Col: 1}
 	if cells[2].Text != "R2C1a\nR2C1b" || cells[2].Location != wantCell3 {
 		t.Errorf("cell 2 = %+v, want text 'R2C1a\\nR2C1b' loc %+v", cells[2], wantCell3)
 	}
@@ -233,7 +234,7 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 	// distinguish by Human label.
 	var sawHeader, sawFooter bool
 	for _, u := range headers {
-		switch u.Location.Human {
+		switch u.Location.Human() {
 		case "Header 1":
 			sawHeader = true
 			if u.Text != "My Header" {
@@ -245,7 +246,7 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 				t.Errorf("footer text = %q, want %q", u.Text, "My Footer")
 			}
 		default:
-			t.Errorf("unexpected header/footer label %q", u.Location.Human)
+			t.Errorf("unexpected header/footer label %q", u.Location.Human())
 		}
 	}
 	if !sawHeader {
@@ -261,7 +262,7 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 	if len(footnoteUnits) != 1 {
 		t.Fatalf("got %d footnote units, want 1: %+v", len(footnoteUnits), footnoteUnits)
 	}
-	if footnoteUnits[0].Location.Human != "Footnote 3" || footnoteUnits[0].Text != "A footnote" {
+	if footnoteUnits[0].Location.Human() != "Footnote 3" || footnoteUnits[0].Text != "A footnote" {
 		t.Errorf("footnote unit = %+v, want Human 'Footnote 3' text 'A footnote'", footnoteUnits[0])
 	}
 
@@ -269,7 +270,7 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 	if len(commentUnits) != 1 {
 		t.Fatalf("got %d comment units, want 1: %+v", len(commentUnits), commentUnits)
 	}
-	if commentUnits[0].Location.Human != "Comment 2" || commentUnits[0].Text != "A comment" {
+	if commentUnits[0].Location.Human() != "Comment 2" || commentUnits[0].Text != "A comment" {
 		t.Errorf("comment unit = %+v, want Human 'Comment 2' text 'A comment'", commentUnits[0])
 	}
 
@@ -307,7 +308,7 @@ func TestExtractEmptyParagraphsStillEmitted(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("got %d units, want 3 (blank paragraphs are still emitted, unlike table cells)", len(got))
 	}
-	if got[1].Text != "" || got[1].Location.Paragraph != 2 {
+	if got[1].Text != "" || got[1].Location.(paragraphLocation).Paragraph != 2 {
 		t.Errorf("middle unit = %+v, want blank text at Paragraph 2", got[1])
 	}
 }
@@ -341,7 +342,7 @@ func TestExtractTextBoxNestedParagraphDoesNotCorruptEnclosingParagraph(t *testin
 	if got[0].Text != wantFirst {
 		t.Errorf("paragraph 1 text = %q, want %q (textbox-nested content must not corrupt the enclosing paragraph)", got[0].Text, wantFirst)
 	}
-	if got[0].Location.Paragraph != 1 || got[0].Location.Human != "Paragraph 1" {
+	if got[0].Location.(paragraphLocation).Paragraph != 1 || got[0].Location.Human() != "Paragraph 1" {
 		t.Errorf("paragraph 1 location = %+v, want Paragraph 1", got[0].Location)
 	}
 	if strings.Contains(got[0].Text, "inside-textbox") {
@@ -352,7 +353,7 @@ func TestExtractTextBoxNestedParagraphDoesNotCorruptEnclosingParagraph(t *testin
 	if got[1].Text != wantSecond {
 		t.Errorf("paragraph 2 text = %q, want %q", got[1].Text, wantSecond)
 	}
-	if got[1].Location.Paragraph != 2 || got[1].Location.Human != "Paragraph 2" {
+	if got[1].Location.(paragraphLocation).Paragraph != 2 || got[1].Location.Human() != "Paragraph 2" {
 		t.Errorf("paragraph 2 location = %+v, want Paragraph 2 (numbering must not shift due to the nested paragraph)", got[1].Location)
 	}
 }

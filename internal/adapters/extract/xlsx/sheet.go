@@ -11,6 +11,19 @@ import (
 	"github.com/laraibg786/ogrep/internal/core/domain"
 )
 
+// cellLocation implements domain.Location for a single non-empty
+// worksheet cell.
+type cellLocation struct {
+	Sheet, Cell string
+	Row, Col    int
+}
+
+func (l cellLocation) Human() string { return fmt.Sprintf("%s!%s", l.Sheet, l.Cell) }
+
+func (l cellLocation) Fields() map[string]any {
+	return map[string]any{"sheet": l.Sheet, "cell": l.Cell, "row": l.Row, "col": l.Col}
+}
+
 // extractSheet streams one worksheet part (xl/worksheets/sheetN.xml),
 // emitting one domain.TextUnit per non-empty cell. It never buffers the
 // sheet into a DOM: it walks encoding/xml tokens one at a time and
@@ -92,16 +105,9 @@ func extractSheet(ctx context.Context, f *zip.File, sheetName string, sharedStri
 			}
 
 			unit := domain.TextUnit{
-				Kind: domain.UnitSheetCell,
-				Location: domain.Location{
-					Format: "xlsx",
-					Sheet:  sheetName,
-					Cell:   cellRef,
-					Row:    row,
-					Col:    col,
-					Human:  fmt.Sprintf("%s!%s", sheetName, cellRef),
-				},
-				Text: text,
+				Kind:     domain.UnitSheetCell,
+				Location: cellLocation{Sheet: sheetName, Cell: cellRef, Row: row, Col: col},
+				Text:     text,
 			}
 			select {
 			case units <- unit:

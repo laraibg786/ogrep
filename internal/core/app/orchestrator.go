@@ -171,6 +171,7 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 		return
 	}
 	atomic.AddInt64(&stats.FilesSearched, 1)
+	format := extractor.Name()
 
 	// A per-file context lets us unblock (and let the extractor's
 	// goroutine exit and close its channels) if we stop consuming units
@@ -219,9 +220,7 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 		if idx <= lastEmittedIdx {
 			return
 		}
-		loc := u.Location
-		loc.Path = path
-		matches = append(matches, domain.Match{Location: loc, Text: u.Text, Spans: spans})
+		matches = append(matches, domain.Match{Path: path, Format: format, Location: u.Location, Text: u.Text, Spans: spans})
 		lastEmittedIdx = idx
 	}
 
@@ -245,9 +244,7 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 			if matched {
 				continue
 			}
-			loc := unit.Location
-			loc.Path = path
-			matches = append(matches, domain.Match{Location: loc, Text: unit.Text})
+			matches = append(matches, domain.Match{Path: path, Format: format, Location: unit.Location, Text: unit.Text})
 			realMatchCount++
 			if opts.MaxCount > 0 && realMatchCount >= opts.MaxCount {
 				break

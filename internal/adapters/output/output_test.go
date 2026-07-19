@@ -9,9 +9,21 @@ import (
 	"github.com/laraibg786/ogrep/internal/core/domain"
 )
 
+// testLocation is a minimal domain.Location implementation for tests
+// that don't need a specific format's location shape.
+type testLocation struct {
+	human  string
+	fields map[string]any
+}
+
+func (l testLocation) Human() string          { return l.human }
+func (l testLocation) Fields() map[string]any { return l.fields }
+
 func sampleMatch() domain.Match {
 	return domain.Match{
-		Location: domain.Location{Format: "text", Path: "a.txt", Human: "line 3", Line: 3},
+		Path:     "a.txt",
+		Format:   "text",
+		Location: testLocation{human: "line 3", fields: map[string]any{"line": 3}},
 		Text:     "hello world",
 		Spans:    []domain.Span{{Start: 0, End: 5}},
 	}

@@ -10,6 +10,42 @@ import (
 	"github.com/laraibg786/ogrep/internal/core/domain"
 )
 
+// paragraphLocation implements domain.Location for a top-level body
+// paragraph.
+type paragraphLocation struct {
+	Paragraph int
+}
+
+func (l paragraphLocation) Human() string { return fmt.Sprintf("Paragraph %d", l.Paragraph) }
+
+func (l paragraphLocation) Fields() map[string]any {
+	return map[string]any{"paragraph": l.Paragraph}
+}
+
+// cellLocation implements domain.Location for a table cell.
+type cellLocation struct {
+	Table, Row, Col int
+}
+
+func (l cellLocation) Human() string {
+	return fmt.Sprintf("Table %d, Row %d, Cell %d", l.Table, l.Row, l.Col)
+}
+
+func (l cellLocation) Fields() map[string]any {
+	return map[string]any{"table": l.Table, "row": l.Row, "col": l.Col}
+}
+
+// labelLocation implements domain.Location for constructs that are fully
+// described by a pre-rendered label: headers/footers ("Header 1") and
+// footnotes/comments ("Footnote 3").
+type labelLocation struct {
+	Label string
+}
+
+func (l labelLocation) Human() string { return l.Label }
+
+func (l labelLocation) Fields() map[string]any { return map[string]any{} }
+
 // send is the callback shape used throughout this file: it delivers one
 // TextUnit and reports whether the caller should keep going (false means
 // the context was cancelled, so the streaming loop should stop early
@@ -250,13 +286,9 @@ func extractDocumentBody(f *zip.File, out send) error {
 				} else {
 					paragraphNum++
 					unit := domain.TextUnit{
-						Kind: domain.UnitParagraph,
-						Location: domain.Location{
-							Format:    "docx",
-							Paragraph: paragraphNum,
-							Human:     fmt.Sprintf("Paragraph %d", paragraphNum),
-						},
-						Text: text,
+						Kind:     domain.UnitParagraph,
+						Location: paragraphLocation{Paragraph: paragraphNum},
+						Text:     text,
 					}
 					if !out(unit) {
 						return nil
@@ -269,15 +301,9 @@ func extractDocumentBody(f *zip.File, out send) error {
 					text := cell.builder.String()
 					if strings.TrimSpace(text) != "" {
 						unit := domain.TextUnit{
-							Kind: domain.UnitTableCell,
-							Location: domain.Location{
-								Format: "docx",
-								Table:  cell.table,
-								Row:    cell.row,
-								Col:    cell.col,
-								Human:  fmt.Sprintf("Table %d, Row %d, Cell %d", cell.table, cell.row, cell.col),
-							},
-							Text: text,
+							Kind:     domain.UnitTableCell,
+							Location: cellLocation{Table: cell.table, Row: cell.row, Col: cell.col},
+							Text:     text,
 						}
 						if !out(unit) {
 							return nil
@@ -355,12 +381,9 @@ func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 				rt.curPara = nil
 				if strings.TrimSpace(text) != "" {
 					unit := domain.TextUnit{
-						Kind: domain.UnitHeaderFooter,
-						Location: domain.Location{
-							Format: "docx",
-							Human:  label,
-						},
-						Text: text,
+						Kind:     domain.UnitHeaderFooter,
+						Location: labelLocation{Label: label},
+						Text:     text,
 					}
 					if !out(unit) {
 						return nil
@@ -457,12 +480,9 @@ func extractFootnoteLike(f *zip.File, elemName string, kind domain.UnitKind, lab
 					inItem = false
 					if strings.TrimSpace(text) != "" {
 						unit := domain.TextUnit{
-							Kind: kind,
-							Location: domain.Location{
-								Format: "docx",
-								Human:  fmt.Sprintf("%s %s", labelPrefix, itemID),
-							},
-							Text: text,
+							Kind:     kind,
+							Location: labelLocation{Label: fmt.Sprintf("%s %s", labelPrefix, itemID)},
+							Text:     text,
 						}
 						if !out(unit) {
 							return nil

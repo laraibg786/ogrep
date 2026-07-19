@@ -56,8 +56,12 @@ func TestExtractStreamsLines(t *testing.T) {
 		if u.Kind != domain.UnitPlainLine {
 			t.Errorf("unit %d kind = %v, want UnitPlainLine", i, u.Kind)
 		}
-		if u.Location.Line != i+1 {
-			t.Errorf("unit %d line = %d, want %d", i, u.Location.Line, i+1)
+		loc, ok := u.Location.(lineLocation)
+		if !ok {
+			t.Fatalf("unit %d location type = %T, want lineLocation", i, u.Location)
+		}
+		if loc.Line != i+1 {
+			t.Errorf("unit %d line = %d, want %d", i, loc.Line, i+1)
 		}
 	}
 }

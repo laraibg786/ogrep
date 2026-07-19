@@ -91,13 +91,13 @@ func TestIntegrationSearchOrchestrator(t *testing.T) {
 
 	var humans []string
 	for _, m := range sink.matches {
-		if m.Location.Format != "pptx" {
-			t.Errorf("match Location.Format = %q, want %q", m.Location.Format, "pptx")
+		if m.Format != "pptx" {
+			t.Errorf("match Format = %q, want %q", m.Format, "pptx")
 		}
-		if m.Location.Path != fixturePath {
-			t.Errorf("match Location.Path = %q, want %q", m.Location.Path, fixturePath)
+		if m.Path != fixturePath {
+			t.Errorf("match Path = %q, want %q", m.Path, fixturePath)
 		}
-		humans = append(humans, m.Location.Human)
+		humans = append(humans, m.Location.Human())
 	}
 	sort.Strings(humans)
 

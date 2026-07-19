@@ -37,17 +37,17 @@ func collectUnits(t *testing.T, data []byte) ([]domain.TextUnit, error) {
 func findUnit(t *testing.T, units []domain.TextUnit, human string) domain.TextUnit {
 	t.Helper()
 	for _, u := range units {
-		if u.Location.Human == human {
+		if u.Location.Human() == human {
 			return u
 		}
 	}
-	t.Fatalf("no unit found with Location.Human = %q (got %d units)", human, len(units))
+	t.Fatalf("no unit found with Location.Human() = %q (got %d units)", human, len(units))
 	return domain.TextUnit{}
 }
 
 func hasUnit(units []domain.TextUnit, human string) bool {
 	for _, u := range units {
-		if u.Location.Human == human {
+		if u.Location.Human() == human {
 			return true
 		}
 	}
@@ -137,14 +137,12 @@ func TestExtractResolvesSheetNamesViaRels(t *testing.T) {
 	if u.Text != "Hello World" {
 		t.Errorf("Sheet1!A1 text = %q, want %q (multi-run shared string)", u.Text, "Hello World")
 	}
-	if u.Location.Sheet != "Sheet1" || u.Location.Cell != "A1" {
-		t.Errorf("Sheet1!A1 Location = %+v", u.Location)
+	fields := u.Location.Fields()
+	if fields["sheet"] != "Sheet1" || fields["cell"] != "A1" {
+		t.Errorf("Sheet1!A1 Fields = %+v", fields)
 	}
-	if u.Location.Col != 1 || u.Location.Row != 1 {
-		t.Errorf("Sheet1!A1 Col/Row = %d/%d, want 1/1", u.Location.Col, u.Location.Row)
-	}
-	if u.Location.Format != "xlsx" {
-		t.Errorf("Location.Format = %q, want %q", u.Location.Format, "xlsx")
+	if fields["col"] != 1 || fields["row"] != 1 {
+		t.Errorf("Sheet1!A1 Col/Row = %v/%v, want 1/1", fields["col"], fields["row"])
 	}
 	if u.Kind != domain.UnitSheetCell {
 		t.Errorf("Kind = %v, want UnitSheetCell", u.Kind)
@@ -156,8 +154,9 @@ func TestExtractResolvesSheetNamesViaRels(t *testing.T) {
 	if b.Text != "Second Sheet Value" {
 		t.Errorf("Budget 2024!B45 text = %q, want %q", b.Text, "Second Sheet Value")
 	}
-	if b.Location.Col != 2 || b.Location.Row != 45 {
-		t.Errorf("Budget 2024!B45 Col/Row = %d/%d, want 2/45", b.Location.Col, b.Location.Row)
+	bFields := b.Location.Fields()
+	if bFields["col"] != 2 || bFields["row"] != 45 {
+		t.Errorf("Budget 2024!B45 Col/Row = %v/%v, want 2/45", bFields["col"], bFields["row"])
 	}
 }
 
