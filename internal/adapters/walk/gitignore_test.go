@@ -149,18 +149,3 @@ func TestPatternSetEmpty(t *testing.T) {
 	}
 }
 
-func TestLockFilePattern(t *testing.T) {
-	cases := map[string]bool{
-		"~$report.docx":  true,
-		"~$notes.pptx":   true,
-		"~$budget.xlsx":  true,
-		"report.docx":    false,
-		"~$report.txt":   false,
-		"a~$report.docx": false,
-	}
-	for name, want := range cases {
-		if got := lockFilePattern.MatchString(name); got != want {
-			t.Errorf("lockFilePattern.MatchString(%q) = %v, want %v", name, got, want)
-		}
-	}
-}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -17,10 +16,6 @@ import (
 var vcsDirs = map[string]bool{
 	".git": true,
 }
-
-// lockFilePattern matches MS Office's transient lock files, e.g.
-// "~$report.docx", which are never real documents.
-var lockFilePattern = regexp.MustCompile(`^~\$.*\.(docx|pptx|xlsx)$`)
 
 // ignoreFileNames are the ignore files consulted in each directory,
 // in load order. .ogrepignore is project-local and additional to
@@ -237,8 +232,14 @@ func (w *Walker) Walk(ctx context.Context, roots []string, opts domain.SearchOpt
 // processDir handles exactly one directory job: it lists the directory,
 // loads its own ignore files, and for each entry either enqueues a new
 // directory job (subdirectories that survive VCS/ignore/glob filtering)
-// or sends a file path on paths (files that survive lock-file/ignore/glob
-// filtering).
+// or sends a file path on paths (files that survive ignore/glob
+// filtering). The walker deliberately has no notion of which files are
+// "real documents" versus something like an MS Office lock file
+// (~$report.docx) -- that's the registry/extractor layer's job (each
+// format's Sniff naturally rejects such placeholder content), so a new
+// format's quirks never require a change here. See
+// internal/adapters/extract/all's regression test for the lock-file
+// case specifically.
 //
 // Every subdirectory discovered here causes exactly one wg.Add(1), paired
 // with exactly one wg.Done() once that subdirectory's own job finishes --
@@ -292,9 +293,6 @@ func (w *Walker) processDir(ctx context.Context, j dirJob, opts domain.SearchOpt
 		}
 
 		// Regular file (or symlink etc.) candidate.
-		if lockFilePattern.MatchString(base) {
-			continue
-		}
 		if !opts.NoIgnore && isIgnored(own, path, false) {
 			continue
 		}

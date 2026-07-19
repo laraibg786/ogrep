@@ -40,15 +40,20 @@ func collectPaths(t *testing.T, w *Walker, root string, opts domain.SearchOption
 	return got
 }
 
-func TestWalkerSkipsGitDirAndLockFiles(t *testing.T) {
+func TestWalkerSkipsGitDir(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "notes.txt"), "hello")
 	writeFile(t, filepath.Join(root, ".git", "HEAD"), "ref: refs/heads/main")
+	// The walker itself has no notion of MS Office lock files -- it just
+	// enumerates candidate paths -- so "~$report.docx" is expected here
+	// like any other file; see internal/adapters/extract/all's
+	// regression test for the actual "never recognized as a document"
+	// guarantee, which lives at the registry/extractor layer instead.
 	writeFile(t, filepath.Join(root, "~$report.docx"), "lock file placeholder")
 	writeFile(t, filepath.Join(root, "report.docx"), "PK\x03\x04 fake docx")
 
 	got := collectPaths(t, New(), root, domain.SearchOptions{})
-	want := []string{"notes.txt", "report.docx"}
+	want := []string{"notes.txt", "report.docx", "~$report.docx"}
 	assertPathsEqual(t, got, want)
 }
 
