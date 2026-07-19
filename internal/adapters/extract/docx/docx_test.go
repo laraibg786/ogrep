@@ -13,6 +13,18 @@ import (
 	"github.com/laraibg786/ogrep/internal/registry"
 )
 
+// findByLocationType returns the subset of units whose Location is of
+// concrete type T, preserving order.
+func findByLocationType[T domain.Location](units []domain.TextUnit) []domain.TextUnit {
+	var out []domain.TextUnit
+	for _, u := range units {
+		if _, ok := u.Location.(T); ok {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
 // buildDocx assembles a minimal, but real, in-memory zip archive with
 // the given named parts (plus a bare-bones [Content_Types].xml and
 // _rels/.rels so it looks like a plausible OOXML package), and returns
@@ -119,9 +131,6 @@ func TestExtractMultipleParagraphs(t *testing.T) {
 
 	wantTexts := []string{"First paragraph", "Second paragraph", "Third"}
 	for i, u := range got {
-		if u.Kind != domain.UnitParagraph {
-			t.Errorf("unit %d kind = %v, want UnitParagraph", i, u.Kind)
-		}
 		if u.Text != wantTexts[i] {
 			t.Errorf("unit %d text = %q, want %q", i, u.Text, wantTexts[i])
 		}
@@ -154,13 +163,13 @@ func TestExtractTableNotDoubleCounted(t *testing.T) {
 
 	var paragraphs, cells []domain.TextUnit
 	for _, u := range got {
-		switch u.Kind {
-		case domain.UnitParagraph:
+		switch u.Location.(type) {
+		case paragraphLocation:
 			paragraphs = append(paragraphs, u)
-		case domain.UnitTableCell:
+		case cellLocation:
 			cells = append(cells, u)
 		default:
-			t.Errorf("unexpected unit kind %v", u.Kind)
+			t.Errorf("unexpected location type %T", u.Location)
 		}
 	}
 
@@ -219,19 +228,9 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 
 	got := extractAll(t, data)
 
-	find := func(kind domain.UnitKind) []domain.TextUnit {
-		var out []domain.TextUnit
-		for _, u := range got {
-			if u.Kind == kind {
-				out = append(out, u)
-			}
-		}
-		return out
-	}
-
-	headers := find(domain.UnitHeaderFooter)
-	// Both header1.xml and footer1.xml produce UnitHeaderFooter units;
-	// distinguish by Human label.
+	headers := findByLocationType[headerFooterLocation](got)
+	// Both header1.xml and footer1.xml produce headerFooterLocation
+	// units; distinguish by Human label.
 	var sawHeader, sawFooter bool
 	for _, u := range headers {
 		switch u.Location.Human() {
@@ -256,7 +255,7 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 		t.Error("expected a Footer 1 unit")
 	}
 
-	footnoteUnits := find(domain.UnitFootnote)
+	footnoteUnits := findByLocationType[footnoteLocation](got)
 	// The blank id=0 footnote (a typical separator placeholder) must be
 	// skipped since it has no non-blank text; only id=3 should surface.
 	if len(footnoteUnits) != 1 {
@@ -266,7 +265,7 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 		t.Errorf("footnote unit = %+v, want Human 'Footnote 3' text 'A footnote'", footnoteUnits[0])
 	}
 
-	commentUnits := find(domain.UnitComment)
+	commentUnits := findByLocationType[commentLocation](got)
 	if len(commentUnits) != 1 {
 		t.Fatalf("got %d comment units, want 1: %+v", len(commentUnits), commentUnits)
 	}
@@ -274,7 +273,7 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 		t.Errorf("comment unit = %+v, want Human 'Comment 2' text 'A comment'", commentUnits[0])
 	}
 
-	paragraphs := find(domain.UnitParagraph)
+	paragraphs := findByLocationType[paragraphLocation](got)
 	if len(paragraphs) != 1 || paragraphs[0].Text != "Body text" {
 		t.Errorf("body paragraphs = %+v, want single 'Body text' paragraph", paragraphs)
 	}

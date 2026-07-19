@@ -144,10 +144,6 @@ func TestExtractResolvesSheetNamesViaRels(t *testing.T) {
 	if fields["col"] != 1 || fields["row"] != 1 {
 		t.Errorf("Sheet1!A1 Col/Row = %v/%v, want 1/1", fields["col"], fields["row"])
 	}
-	if u.Kind != domain.UnitSheetCell {
-		t.Errorf("Kind = %v, want UnitSheetCell", u.Kind)
-	}
-
 	// "Budget 2024" (declared second, r:id=rId1) must resolve to
 	// sheet3.xml's content, with the correctly-mapped shared string.
 	b := findUnit(t, units, "Budget 2024!B45")

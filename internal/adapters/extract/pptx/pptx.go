@@ -74,11 +74,11 @@ func (Extractor) Sniff(path string, ra io.ReaderAt, size int64) (ok bool) {
 }
 
 // Extract implements ports.DocumentExtractor. It streams one TextUnit
-// per paragraph: UnitSlideShape for paragraphs found in a slide's
-// shapes (one TextUnit per <a:p>, not per whole shape, so a match's
-// Location pinpoints the paragraph rather than a whole possibly-large
-// shape), and UnitSlideNotes for paragraphs found in that slide's
-// associated notes part, if any.
+// per paragraph: a shapeLocation-tagged unit for paragraphs found in a
+// slide's shapes (one TextUnit per <a:p>, not per whole shape, so a
+// match's Location pinpoints the paragraph rather than a whole
+// possibly-large shape), and a notesLocation-tagged unit for paragraphs
+// found in that slide's associated notes part, if any.
 func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-chan domain.TextUnit, <-chan error) {
 	units := make(chan domain.TextUnit)
 	errc := make(chan error, 1)
@@ -127,7 +127,7 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 				continue
 			}
 
-			aborted, err := streamPart(ctx, units, sf, domain.UnitSlideShape, slideNum)
+			aborted, err := streamPart(ctx, units, sf, shapePart, slideNum)
 			if err != nil {
 				sendErr(errc, err)
 				return
@@ -145,7 +145,7 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 				continue
 			}
 
-			aborted, err = streamPart(ctx, units, nf, domain.UnitSlideNotes, slideNum)
+			aborted, err = streamPart(ctx, units, nf, notesPart, slideNum)
 			if err != nil {
 				sendErr(errc, err)
 				return

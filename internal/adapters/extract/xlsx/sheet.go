@@ -105,7 +105,6 @@ func extractSheet(ctx context.Context, f *zip.File, sheetName string, sharedStri
 			}
 
 			unit := domain.TextUnit{
-				Kind:     domain.UnitSheetCell,
 				Location: cellLocation{Sheet: sheetName, Cell: cellRef, Row: row, Col: col},
 				Text:     text,
 			}

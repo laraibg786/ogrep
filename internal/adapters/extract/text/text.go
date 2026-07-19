@@ -126,7 +126,6 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 			lineNo++
 			line := scanner.Text()
 			unit := domain.TextUnit{
-				Kind:     domain.UnitPlainLine,
 				Location: lineLocation{Line: lineNo},
 				Text:     line,
 			}

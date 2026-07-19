@@ -94,7 +94,7 @@ func TestExtractSlideOrderFollowsSldIdLstNotFilenames(t *testing.T) {
 
 	var got []domain.TextUnit
 	for _, u := range units {
-		if u.Kind == domain.UnitSlideShape {
+		if _, ok := u.Location.(shapeLocation); ok {
 			got = append(got, u)
 		}
 	}
@@ -188,10 +188,10 @@ func TestExtractNotesAssociatedViaSlideRels(t *testing.T) {
 
 	var shapeUnits, notesUnits []domain.TextUnit
 	for _, u := range units {
-		switch u.Kind {
-		case domain.UnitSlideShape:
+		switch u.Location.(type) {
+		case shapeLocation:
 			shapeUnits = append(shapeUnits, u)
-		case domain.UnitSlideNotes:
+		case notesLocation:
 			notesUnits = append(notesUnits, u)
 		}
 	}

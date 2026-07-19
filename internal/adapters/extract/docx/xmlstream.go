@@ -35,16 +35,36 @@ func (l cellLocation) Fields() map[string]any {
 	return map[string]any{"table": l.Table, "row": l.Row, "col": l.Col}
 }
 
-// labelLocation implements domain.Location for constructs that are fully
-// described by a pre-rendered label: headers/footers ("Header 1") and
-// footnotes/comments ("Footnote 3").
-type labelLocation struct {
+// headerFooterLocation implements domain.Location for a paragraph found
+// in a header or footer part, fully described by a pre-rendered label
+// ("Header 1", "Footer 2").
+type headerFooterLocation struct {
 	Label string
 }
 
-func (l labelLocation) Human() string { return l.Label }
+func (l headerFooterLocation) Human() string { return l.Label }
 
-func (l labelLocation) Fields() map[string]any { return map[string]any{} }
+func (l headerFooterLocation) Fields() map[string]any { return map[string]any{} }
+
+// footnoteLocation implements domain.Location for one footnote, fully
+// described by a pre-rendered label ("Footnote 3").
+type footnoteLocation struct {
+	Label string
+}
+
+func (l footnoteLocation) Human() string { return l.Label }
+
+func (l footnoteLocation) Fields() map[string]any { return map[string]any{} }
+
+// commentLocation implements domain.Location for one comment, fully
+// described by a pre-rendered label ("Comment 2").
+type commentLocation struct {
+	Label string
+}
+
+func (l commentLocation) Human() string { return l.Label }
+
+func (l commentLocation) Fields() map[string]any { return map[string]any{} }
 
 // send is the callback shape used throughout this file: it delivers one
 // TextUnit and reports whether the caller should keep going (false means
@@ -203,10 +223,10 @@ type cellState struct {
 }
 
 // extractDocumentBody streams word/document.xml, emitting one
-// domain.UnitParagraph per top-level body paragraph and one
-// domain.UnitTableCell per non-blank table cell (concatenating all of
-// the cell's paragraphs). See the package doc comment for the numbering
-// and double-counting rules this implements.
+// paragraphLocation-tagged unit per top-level body paragraph and one
+// cellLocation-tagged unit per non-blank table cell (concatenating all
+// of the cell's paragraphs). See the package doc comment for the
+// numbering and double-counting rules this implements.
 func extractDocumentBody(f *zip.File, out send) error {
 	rc, err := f.Open()
 	if err != nil {
@@ -286,7 +306,6 @@ func extractDocumentBody(f *zip.File, out send) error {
 				} else {
 					paragraphNum++
 					unit := domain.TextUnit{
-						Kind:     domain.UnitParagraph,
 						Location: paragraphLocation{Paragraph: paragraphNum},
 						Text:     text,
 					}
@@ -301,7 +320,6 @@ func extractDocumentBody(f *zip.File, out send) error {
 					text := cell.builder.String()
 					if strings.TrimSpace(text) != "" {
 						unit := domain.TextUnit{
-							Kind:     domain.UnitTableCell,
 							Location: cellLocation{Table: cell.table, Row: cell.row, Col: cell.col},
 							Text:     text,
 						}
@@ -324,10 +342,10 @@ func extractDocumentBody(f *zip.File, out send) error {
 }
 
 // extractHeaderFooterPart streams a word/header*.xml or word/footer*.xml
-// part, emitting one domain.UnitHeaderFooter per non-blank paragraph,
-// all sharing the given label (e.g. "Header 1"). Table structure inside
-// headers/footers is deliberately not tracked; see the package doc
-// comment for why that's safe here.
+// part, emitting one headerFooterLocation-tagged unit per non-blank
+// paragraph, all sharing the given label (e.g. "Header 1"). Table
+// structure inside headers/footers is deliberately not tracked; see the
+// package doc comment for why that's safe here.
 func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 	rc, err := f.Open()
 	if err != nil {
@@ -381,8 +399,7 @@ func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 				rt.curPara = nil
 				if strings.TrimSpace(text) != "" {
 					unit := domain.TextUnit{
-						Kind:     domain.UnitHeaderFooter,
-						Location: labelLocation{Label: label},
+						Location: headerFooterLocation{Label: label},
 						Text:     text,
 					}
 					if !out(unit) {
@@ -400,13 +417,13 @@ func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 
 // extractFootnoteLike streams word/footnotes.xml or word/comments.xml,
 // where elemName is "footnote" or "comment" respectively: each such
-// element becomes one TextUnit of the given kind, concatenating all of
-// its paragraphs (joined by "\n"). Location.Human uses the element's own
-// w:id attribute ("Footnote 3"/"Comment 2"), falling back to a running
-// counter if that attribute is missing or unparsable as a plain string
-// (in practice w:id is always present on real documents; the fallback
-// only guards against malformed input).
-func extractFootnoteLike(f *zip.File, elemName string, kind domain.UnitKind, labelPrefix string, out send) error {
+// element becomes one TextUnit whose Location is built by newLoc,
+// concatenating all of its paragraphs (joined by "\n"). Location.Human
+// uses the element's own w:id attribute ("Footnote 3"/"Comment 2"),
+// falling back to a running counter if that attribute is missing or
+// unparsable as a plain string (in practice w:id is always present on
+// real documents; the fallback only guards against malformed input).
+func extractFootnoteLike(f *zip.File, elemName string, newLoc func(label string) domain.Location, labelPrefix string, out send) error {
 	rc, err := f.Open()
 	if err != nil {
 		return err
@@ -480,8 +497,7 @@ func extractFootnoteLike(f *zip.File, elemName string, kind domain.UnitKind, lab
 					inItem = false
 					if strings.TrimSpace(text) != "" {
 						unit := domain.TextUnit{
-							Kind:     kind,
-							Location: labelLocation{Label: fmt.Sprintf("%s %s", labelPrefix, itemID)},
+							Location: newLoc(fmt.Sprintf("%s %s", labelPrefix, itemID)),
 							Text:     text,
 						}
 						if !out(unit) {

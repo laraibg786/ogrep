@@ -6,50 +6,6 @@
 // sinks — keep them free of any adapter-specific logic.
 package domain
 
-// UnitKind identifies the kind of document construct a TextUnit was
-// extracted from. Extractors should pick the most specific kind that
-// applies; the text plugin uses UnitPlainLine.
-type UnitKind int
-
-const (
-	UnitParagraph UnitKind = iota
-	UnitTableCell
-	UnitSlideShape
-	UnitSlideNotes
-	UnitSheetCell
-	UnitHeaderFooter
-	UnitFootnote
-	UnitComment
-	UnitPlainLine // for the text plugin
-)
-
-// String returns a short human-readable name for the unit kind, mostly
-// useful for debugging/logging.
-func (k UnitKind) String() string {
-	switch k {
-	case UnitParagraph:
-		return "paragraph"
-	case UnitTableCell:
-		return "table-cell"
-	case UnitSlideShape:
-		return "slide-shape"
-	case UnitSlideNotes:
-		return "slide-notes"
-	case UnitSheetCell:
-		return "sheet-cell"
-	case UnitHeaderFooter:
-		return "header-footer"
-	case UnitFootnote:
-		return "footnote"
-	case UnitComment:
-		return "comment"
-	case UnitPlainLine:
-		return "plain-line"
-	default:
-		return "unknown"
-	}
-}
-
 // Location describes where within a file a TextUnit or Match came from.
 // It is implemented by each extraction plugin (docx/pptx/xlsx/text), not
 // by core: a docx paragraph location knows about paragraph numbers, an
@@ -79,7 +35,6 @@ type Span struct {
 // TextUnits over a channel rather than building a full in-memory
 // document tree.
 type TextUnit struct {
-	Kind     UnitKind
 	Location Location
 	Text     string
 }

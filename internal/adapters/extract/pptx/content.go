@@ -153,6 +153,16 @@ func streamParagraphs(r io.Reader, emit paragraphEmitter) error {
 	}
 }
 
+// partKind distinguishes a slide's own shapes from its speaker notes,
+// purely as an internal detail of how streamPart picks a Location type —
+// it has no meaning outside this package.
+type partKind int
+
+const (
+	shapePart partKind = iota
+	notesPart
+)
+
 // streamPart opens f (a slide or notes zip part) and streams its
 // paragraphs onto units as TextUnits of the given kind, associated
 // with slideNum. It reports aborted=true if the consumer's context was
@@ -160,7 +170,7 @@ func streamParagraphs(r io.Reader, emit paragraphEmitter) error {
 // which case the caller should stop processing further parts
 // immediately rather than continuing to produce units nobody will
 // read.
-func streamPart(ctx context.Context, units chan<- domain.TextUnit, f *zip.File, kind domain.UnitKind, slideNum int) (aborted bool, err error) {
+func streamPart(ctx context.Context, units chan<- domain.TextUnit, f *zip.File, kind partKind, slideNum int) (aborted bool, err error) {
 	rc, oerr := f.Open()
 	if oerr != nil {
 		return false, fmt.Errorf("pptx: opening %s: %w", f.Name, oerr)
@@ -170,13 +180,13 @@ func streamPart(ctx context.Context, units chan<- domain.TextUnit, f *zip.File, 
 	perr := streamParagraphs(rc, func(shapeName, text string) bool {
 		var loc domain.Location
 		switch kind {
-		case domain.UnitSlideNotes:
+		case notesPart:
 			loc = notesLocation{Slide: slideNum}
-		default: // domain.UnitSlideShape
+		default: // shapePart
 			loc = shapeLocation{Slide: slideNum, Shape: shapeName}
 		}
 
-		unit := domain.TextUnit{Kind: kind, Location: loc, Text: text}
+		unit := domain.TextUnit{Location: loc, Text: text}
 		select {
 		case units <- unit:
 			return true

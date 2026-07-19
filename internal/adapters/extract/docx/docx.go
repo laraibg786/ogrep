@@ -7,31 +7,31 @@
 // namespace, referred to as "w:" below):
 //
 //   - word/document.xml: the main body (w:body). Body paragraphs are
-//     numbered sequentially (1-based) in document order and reported as
-//     domain.UnitParagraph with Location.Human "Paragraph N". Paragraphs
+//     numbered sequentially (1-based) in document order and reported
+//     with a paragraphLocation whose Human is "Paragraph N". Paragraphs
 //     nested inside a table cell (w:tbl > w:tr > w:tc > w:p) do NOT bump
 //     this counter — they are addressed instead via Table/Row/Col and
-//     reported as domain.UnitTableCell with Location.Human
+//     reported with a cellLocation whose Human is
 //     "Table T, Row R, Cell C", concatenating every paragraph within the
 //     cell (joined by "\n") into a single unit so a cell's text isn't
 //     ALSO emitted a second time as a bare paragraph.
 //   - word/header*.xml, word/footer*.xml: one or more headers/footers
 //     (w:hdr / w:ftr root elements). Every non-blank paragraph found in
-//     each part is reported as domain.UnitHeaderFooter, sharing that
-//     part's Location.Human label ("Header 1", "Footer 2", ...) derived
-//     from the numeric suffix in the part's file name (falling back to
-//     a position counter if a part is oddly named). Table structure
+//     each part is reported with a headerFooterLocation, sharing that
+//     part's Human label ("Header 1", "Footer 2", ...) derived from the
+//     numeric suffix in the part's file name (falling back to a
+//     position counter if a part is oddly named). Table structure
 //     inside headers/footers is intentionally NOT tracked (unlike the
 //     body): headers/footers are rare to contain tables, and since there
 //     is only one emission path here (one unit per w:p, whether or not
 //     it happens to sit inside a table cell) there's no double-counting
 //     risk that would otherwise justify the extra complexity.
 //   - word/footnotes.xml, word/comments.xml: each w:footnote / w:comment
-//     element becomes exactly one domain.UnitFootnote /
-//     domain.UnitComment, concatenating all of its paragraphs (joined by
-//     "\n") into one unit. Location.Human uses the part's own w:id
-//     attribute ("Footnote 3", "Comment 2"), falling back to a running
-//     counter if the attribute is missing or unparsable.
+//     element becomes exactly one unit tagged with a footnoteLocation /
+//     commentLocation, concatenating all of its paragraphs (joined by
+//     "\n") into one unit. Human uses the part's own w:id attribute
+//     ("Footnote 3", "Comment 2"), falling back to a running counter if
+//     the attribute is missing or unparsable.
 //
 // Fidelity choices for run content: w:t text is concatenated verbatim;
 // w:tab inserts a literal tab character and w:br/w:cr insert a newline.
@@ -176,10 +176,10 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 		}
 
 		if ff, ok := filesByName["word/footnotes.xml"]; ok {
-			noteErr(extractFootnoteLike(ff, "footnote", domain.UnitFootnote, "Footnote", send))
+			noteErr(extractFootnoteLike(ff, "footnote", func(label string) domain.Location { return footnoteLocation{Label: label} }, "Footnote", send))
 		}
 		if cf, ok := filesByName["word/comments.xml"]; ok {
-			noteErr(extractFootnoteLike(cf, "comment", domain.UnitComment, "Comment", send))
+			noteErr(extractFootnoteLike(cf, "comment", func(label string) domain.Location { return commentLocation{Label: label} }, "Comment", send))
 		}
 
 		if firstErr != nil {

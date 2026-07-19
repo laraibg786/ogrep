@@ -110,7 +110,6 @@ func (e workExtractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) 
 				text += " needle"
 			}
 			u := domain.TextUnit{
-				Kind:     domain.UnitPlainLine,
 				Location: fakeLineLocation{line: i},
 				Text:     text,
 			}
