@@ -31,9 +31,14 @@ import (
 // artifact to the git tag it was built from.
 var version = "dev"
 
-const longHelp = `ogrep searches for a pattern in files, including MS Office
-documents (docx/pptx/xlsx) and plain text, streaming through each
-document instead of loading it fully into memory.
+// buildLongHelp renders the CLI's long help text, interpolating the
+// currently-registered extractor names (formats) so the text never goes
+// stale as format plugins are added or removed; see
+// registeredFormatNames.
+func buildLongHelp(formats []string) string {
+	return fmt.Sprintf(`ogrep searches for a pattern in files, including MS Office
+documents and plain text, streaming through each document instead of
+loading it fully into memory. Supported formats: %s.
 
 Usage:
 
@@ -46,8 +51,8 @@ search.
 Context lines (-A/-B/-C) and format filtering (--type) work like
 ripgrep's: -C N shows N text units of context on both sides of a match
 (overridden per-side by an explicit -A/-B), and --type restricts the
-search to files recognized by a specific extractor (docx, pptx, xlsx,
-text), independent of file extension.
+search to files recognized by a specific extractor (%s), independent of
+file extension.
 
 Config file:
 
@@ -69,7 +74,8 @@ Shell completion:
             "$HOME/.config/fish/completions/ogrep.fish"
 
   Run "ogrep completion --help" for full details.
-`
+`, strings.Join(formats, "/"), strings.Join(formats, ", "))
+}
 
 func main() {
 	if err := newRootCmd().Execute(); err != nil {
@@ -120,10 +126,12 @@ func newRootCmd() *cobra.Command {
 		flags.threads = cfg.Threads
 	}
 
+	formats := registeredFormatNames()
+
 	rootCmd := &cobra.Command{
 		Use:           "ogrep PATTERN [PATH...]",
 		Short:         "Search plain text and MS Office documents for a pattern",
-		Long:          longHelp,
+		Long:          buildLongHelp(formats),
 		Args:          cobra.MinimumNArgs(1),
 		SilenceUsage:  true,
 		SilenceErrors: false,
@@ -162,7 +170,7 @@ func newRootCmd() *cobra.Command {
 	rootCmd.Flags().StringArrayVar(&flags.includeGlobs, "include", nil, "only search files matching this glob (repeatable)")
 	rootCmd.Flags().StringArrayVar(&flags.excludeGlobs, "exclude", nil, "skip files matching this glob (repeatable)")
 	rootCmd.Flags().BoolVar(&flags.noIgnore, "no-ignore", false, "don't respect .gitignore/.ogrepignore files")
-	rootCmd.Flags().StringArrayVar(&flags.types, "type", nil, "only search files of this format, e.g. docx, pptx, xlsx, text (repeatable)")
+	rootCmd.Flags().StringArrayVar(&flags.types, "type", nil, fmt.Sprintf("only search files of this format: %s (repeatable)", strings.Join(formats, ", ")))
 
 	rootCmd.Flags().BoolVarP(&flags.filesWithMatches, "files-with-matches", "l", false, "print only the paths of files with a match, one per line")
 	rootCmd.Flags().BoolVarP(&flags.countOnly, "count", "c", false, "print only \"path:count\" per matching file, instead of each match")
@@ -267,19 +275,32 @@ func runSearch(cmd *cobra.Command, args []string, flags cliFlags, cfg xdg.Config
 	return nil
 }
 
+// registeredFormatNames returns the Name() of every extractor currently
+// registered in registry.Default, sorted for stable/reproducible output.
+// Both validateTypes' error message and the CLI help text below build
+// their format lists from this, so a new format plugin only needs to
+// self-register (see internal/adapters/extract/all) to show up
+// everywhere ogrep mentions supported formats.
+func registeredFormatNames() []string {
+	registered := registry.Default.All()
+	names := make([]string, 0, len(registered))
+	for _, e := range registered {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return names
+}
+
 // validateTypes checks each requested --type value against the actually
 // registered extractors' Name()s, returning a clear error listing valid
 // choices if an unknown type is given, rather than silently matching no
 // files.
 func validateTypes(types []string) error {
-	registered := registry.Default.All()
-	valid := make(map[string]bool, len(registered))
-	names := make([]string, 0, len(registered))
-	for _, e := range registered {
-		valid[e.Name()] = true
-		names = append(names, e.Name())
+	names := registeredFormatNames()
+	valid := make(map[string]bool, len(names))
+	for _, n := range names {
+		valid[n] = true
 	}
-	sort.Strings(names)
 
 	for _, t := range types {
 		if !valid[t] {
