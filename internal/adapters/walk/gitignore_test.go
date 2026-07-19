@@ -148,4 +148,3 @@ func TestPatternSetEmpty(t *testing.T) {
 		t.Error("empty PatternSet should never match")
 	}
 }
-
