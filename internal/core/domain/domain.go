@@ -6,6 +6,23 @@
 // sinks — keep them free of any adapter-specific logic.
 package domain
 
+import "net/url"
+
+// FileURI builds a file:// URI for path, with fragment (if non-empty)
+// appended as the URI fragment. Both are percent-encoded: POSIX
+// filenames and sheet/shape names may legally contain spaces, '#',
+// '%', tabs, or even newlines, none of which are valid unescaped in a
+// URI, so this must never be built by plain string concatenation.
+// Extractors call this from HyperlinkURI rather than each hand-rolling
+// their own escaping.
+func FileURI(path, fragment string) string {
+	u := &url.URL{Scheme: "file", Path: path}
+	if fragment != "" {
+		u.Fragment = fragment
+	}
+	return u.String()
+}
+
 // Location describes where within a file a TextUnit or Match came from.
 // It is implemented by each extraction plugin (docx/pptx/xlsx/text), not
 // by core: a docx paragraph location knows about paragraph numbers, an
@@ -22,6 +39,14 @@ type Location interface {
 	// Fields returns format-specific structured data for machine-readable
 	// output (e.g. JSON), keyed by field name (e.g. "slide", "shape").
 	Fields() map[string]any
+
+	// HyperlinkURI returns the URI a terminal should open (via an OSC 8
+	// hyperlink) when this location is clicked, given the file's path.
+	// Each format decides its own scheme (e.g. a text line links to
+	// `file://path:line:1`, an xlsx cell to `file://path#Sheet!Cell`).
+	// Return "" if the format has nothing sensible to link to (e.g. a
+	// docx header/footer); output sinks then print the location plain.
+	HyperlinkURI(path string) string
 }
 
 // Span is a byte-offset range [Start, End) into the Text of the TextUnit

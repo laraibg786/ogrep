@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
+	"unicode"
 
 	"github.com/laraibg786/ogrep/internal/core/domain"
 )
@@ -18,10 +20,37 @@ type cellLocation struct {
 	Row, Col    int
 }
 
-func (l cellLocation) Human() string { return fmt.Sprintf("%s!%s", l.Sheet, l.Cell) }
+// Human renders "Sheet:Cell" (colon-separated, matching the rest of
+// ogrep's "path:location" display) rather than Excel's own "Sheet!Cell"
+// formula syntax, which would visually clash with the path:location
+// colon that already precedes it.
+func (l cellLocation) Human() string { return fmt.Sprintf("%s:%s", l.Sheet, l.Cell) }
 
 func (l cellLocation) Fields() map[string]any {
 	return map[string]any{"sheet": l.Sheet, "cell": l.Cell, "row": l.Row, "col": l.Col}
+}
+
+func (l cellLocation) HyperlinkURI(path string) string {
+	return domain.FileURI(path, quotedSheetRef(l.Sheet)+"!"+l.Cell)
+}
+
+// quotedSheetRef renders a sheet name the way Excel itself does inside
+// a reference: names containing anything other than letters, digits,
+// or underscores must be wrapped in single quotes, with any embedded
+// single quote doubled (Excel's escape for a literal quote in a quoted
+// sheet name).
+func quotedSheetRef(sheet string) string {
+	plain := true
+	for _, r := range sheet {
+		if !(r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)) {
+			plain = false
+			break
+		}
+	}
+	if plain {
+		return sheet
+	}
+	return "'" + strings.ReplaceAll(sheet, "'", "''") + "'"
 }
 
 // extractSheet streams one worksheet part (xl/worksheets/sheetN.xml),

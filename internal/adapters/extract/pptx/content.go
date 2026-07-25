@@ -6,6 +6,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/laraibg786/ogrep/internal/core/domain"
@@ -44,6 +45,14 @@ func (l shapeLocation) Fields() map[string]any {
 	return map[string]any{"slide": l.Slide, "shape": l.Shape}
 }
 
+// HyperlinkURI uses a bare slide-number fragment (`#N`), which is the
+// convention PowerPoint and viewers actually honor when opening a local
+// file:// link at a specific slide (unlike `#slide=N`, which isn't
+// recognized).
+func (l shapeLocation) HyperlinkURI(path string) string {
+	return domain.FileURI(path, strconv.Itoa(l.Slide))
+}
+
 // notesLocation implements domain.Location for text found in a slide's
 // speaker notes.
 type notesLocation struct {
@@ -57,6 +66,10 @@ func (l notesLocation) Human() string {
 func (l notesLocation) Fields() map[string]any {
 	return map[string]any{"slide": l.Slide}
 }
+
+// HyperlinkURI returns "": PowerPoint has no addressable location for
+// speaker notes.
+func (l notesLocation) HyperlinkURI(path string) string { return "" }
 
 // paragraphEmitter is invoked once per completed paragraph (on the
 // <a:p> closing tag) with the name of its enclosing shape and the

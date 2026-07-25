@@ -9,6 +9,34 @@ import (
 	"github.com/laraibg786/ogrep/internal/core/domain"
 )
 
+func TestLocationHyperlinkURI(t *testing.T) {
+	const path = "/path/presentation.pptx"
+	cases := []struct {
+		name string
+		loc  domain.Location
+		want string
+	}{
+		{"shape", shapeLocation{Slide: 12, Shape: "Title"}, "file:///path/presentation.pptx#12"},
+		{"notes", notesLocation{Slide: 12}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.loc.HyperlinkURI(path); got != tc.want {
+				t.Errorf("HyperlinkURI() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestShapeLocationHyperlinkURIEscapesPath(t *testing.T) {
+	loc := shapeLocation{Slide: 2, Shape: "Title"}
+	got := loc.HyperlinkURI("/path/my presentation.pptx")
+	want := "file:///path/my%20presentation.pptx#2"
+	if got != want {
+		t.Errorf("HyperlinkURI() = %q, want %q", got, want)
+	}
+}
+
 func TestSniffAcceptsValidPptx(t *testing.T) {
 	data := buildPptxSimple(t)
 	r := bytes.NewReader(data)

@@ -30,10 +30,16 @@ type jsonSpan struct {
 }
 
 // WriteMatch implements ports.OutputSink. The record's fixed fields
-// (type/path/format/location/text/spans) are always present; the
-// remaining keys are format-specific and come entirely from
-// m.Location.Fields(), so this sink never needs to know what those keys
-// are for any given format.
+// (type/path/format/uri/text/spans) are always present; the remaining
+// keys are format-specific and come entirely from m.Location.Fields()
+// (e.g. "line"/"col" for a text match, "sheet"/"cell"/"row"/"col" for an
+// xlsx one) — deliberately no generic "location" string, since a single
+// human-rendered field means something different per format and forces
+// consumers to parse it back apart. The named fields are the source of
+// truth; use those instead. "uri" is "" when the format has nothing
+// navigable to link to (see domain.Location.HyperlinkURI) — consumers
+// should treat an empty string as "no link", not omit-vs-present, since
+// the field is always emitted for a stable schema.
 func (j *JSON) WriteMatch(m domain.Match) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -44,12 +50,12 @@ func (j *JSON) WriteMatch(m domain.Match) error {
 	}
 
 	rec := map[string]any{
-		"type":     "match",
-		"path":     m.Path,
-		"format":   m.Format,
-		"location": m.Location.Human(),
-		"text":     m.Text,
-		"spans":    spans,
+		"type":   "match",
+		"path":   m.Path,
+		"format": m.Format,
+		"uri":    m.Location.HyperlinkURI(m.Path),
+		"text":   m.Text,
+		"spans":  spans,
 	}
 	for k, v := range m.Location.Fields() {
 		rec[k] = v

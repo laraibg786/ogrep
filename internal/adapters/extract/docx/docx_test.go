@@ -81,6 +81,56 @@ func extractAll(t *testing.T, data []byte) []domain.TextUnit {
 	return got
 }
 
+func TestLocationHyperlinkURI(t *testing.T) {
+	const path = "/path/doc.docx"
+	cases := []struct {
+		name string
+		loc  domain.Location
+		want string
+	}{
+		{"paragraph", paragraphLocation{Paragraph: 88}, "file:///path/doc.docx"},
+		{"cell", cellLocation{Table: 1, Row: 2, Col: 3}, "file:///path/doc.docx"},
+		{"headerFooter", headerFooterLocation{Label: "Header 1"}, ""},
+		{"footnote", footnoteLocation{Label: "Footnote 3"}, ""},
+		{"comment", commentLocation{Label: "Comment 2"}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.loc.HyperlinkURI(path); got != tc.want {
+				t.Errorf("HyperlinkURI() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLabelOnlyLocationsExposeLabelInFields(t *testing.T) {
+	cases := []struct {
+		name string
+		loc  domain.Location
+		want string
+	}{
+		{"headerFooter", headerFooterLocation{Label: "Header 1"}, "Header 1"},
+		{"footnote", footnoteLocation{Label: "Footnote 3"}, "Footnote 3"},
+		{"comment", commentLocation{Label: "Comment 2"}, "Comment 2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.loc.Fields()["label"]; got != tc.want {
+				t.Errorf("Fields()[\"label\"] = %v, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestParagraphLocationHyperlinkURIEscapesPath(t *testing.T) {
+	loc := paragraphLocation{Paragraph: 1}
+	got := loc.HyperlinkURI("/path/my doc.docx")
+	want := "file:///path/my%20doc.docx"
+	if got != want {
+		t.Errorf("HyperlinkURI() = %q, want %q", got, want)
+	}
+}
+
 func TestSniffAcceptsDocx(t *testing.T) {
 	data := buildDocx(t, map[string]string{
 		"word/document.xml": `<?xml version="1.0" encoding="UTF-8"?><w:document ` + wNS + `><w:body><w:p><w:r><w:t>hi</w:t></w:r></w:p></w:body></w:document>`,

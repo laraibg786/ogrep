@@ -65,6 +65,9 @@ type fakeLineLocation struct {
 
 func (l fakeLineLocation) Human() string          { return fmt.Sprintf("line %d", l.line) }
 func (l fakeLineLocation) Fields() map[string]any { return map[string]any{"line": l.line} }
+func (l fakeLineLocation) HyperlinkURI(path string) string {
+	return fmt.Sprintf("%s:%d:1", domain.FileURI(path, ""), l.line)
+}
 
 // workExtractor is a ports.DocumentExtractor whose Extract emits
 // unitsPerFile TextUnits, each preceded by a small busyWork call so the

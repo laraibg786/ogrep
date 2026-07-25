@@ -133,7 +133,7 @@ func TestExtractResolvesSheetNamesViaRels(t *testing.T) {
 	// "Sheet1" (declared first, r:id=rId2) must resolve to sheet2.xml's
 	// content, not sheet1.xml (which doesn't even exist in this
 	// fixture) and not sheet3.xml (Budget 2024's actual part).
-	u := findUnit(t, units, "Sheet1!A1")
+	u := findUnit(t, units, "Sheet1:A1")
 	if u.Text != "Hello World" {
 		t.Errorf("Sheet1!A1 text = %q, want %q (multi-run shared string)", u.Text, "Hello World")
 	}
@@ -146,7 +146,7 @@ func TestExtractResolvesSheetNamesViaRels(t *testing.T) {
 	}
 	// "Budget 2024" (declared second, r:id=rId1) must resolve to
 	// sheet3.xml's content, with the correctly-mapped shared string.
-	b := findUnit(t, units, "Budget 2024!B45")
+	b := findUnit(t, units, "Budget 2024:B45")
 	if b.Text != "Second Sheet Value" {
 		t.Errorf("Budget 2024!B45 text = %q, want %q", b.Text, "Second Sheet Value")
 	}
@@ -162,7 +162,7 @@ func TestExtractFormulaResultUsesCachedValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
-	u := findUnit(t, units, "Budget 2024!C1")
+	u := findUnit(t, units, "Budget 2024:C1")
 	if u.Text != "FormulaResult" {
 		t.Errorf("Budget 2024!C1 text = %q, want the cached <v> value %q, not the formula source", u.Text, "FormulaResult")
 	}
@@ -174,7 +174,7 @@ func TestExtractNumericCell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
-	u := findUnit(t, units, "Budget 2024!D1")
+	u := findUnit(t, units, "Budget 2024:D1")
 	if u.Text != "3.14" {
 		t.Errorf("Budget 2024!D1 text = %q, want %q", u.Text, "3.14")
 	}
@@ -188,11 +188,11 @@ func TestExtractBooleanCells(t *testing.T) {
 	}
 	// Judgment call: booleans render as the literal words TRUE/FALSE
 	// (what a user visually sees in Excel), not "1"/"0".
-	trueU := findUnit(t, units, "Budget 2024!E1")
+	trueU := findUnit(t, units, "Budget 2024:E1")
 	if trueU.Text != "TRUE" {
 		t.Errorf("Budget 2024!E1 text = %q, want %q", trueU.Text, "TRUE")
 	}
-	falseU := findUnit(t, units, "Budget 2024!F1")
+	falseU := findUnit(t, units, "Budget 2024:F1")
 	if falseU.Text != "FALSE" {
 		t.Errorf("Budget 2024!F1 text = %q, want %q", falseU.Text, "FALSE")
 	}
@@ -204,7 +204,7 @@ func TestExtractErrorCell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
-	u := findUnit(t, units, "Budget 2024!G1")
+	u := findUnit(t, units, "Budget 2024:G1")
 	if u.Text != "#DIV/0!" {
 		t.Errorf("Budget 2024!G1 text = %q, want %q", u.Text, "#DIV/0!")
 	}
@@ -216,7 +216,7 @@ func TestExtractInlineStringCell(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
-	u := findUnit(t, units, "Budget 2024!H1")
+	u := findUnit(t, units, "Budget 2024:H1")
 	if u.Text != "Inline text" {
 		t.Errorf("Budget 2024!H1 text = %q, want %q", u.Text, "Inline text")
 	}
@@ -228,7 +228,7 @@ func TestExtractSkipsEmptyCells(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Extract() error = %v", err)
 	}
-	if hasUnit(units, "Budget 2024!I1") {
+	if hasUnit(units, "Budget 2024:I1") {
 		t.Error("expected no unit for empty cell I1, but one was emitted")
 	}
 }

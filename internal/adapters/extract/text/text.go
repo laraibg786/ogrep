@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/laraibg786/ogrep/internal/core/domain"
@@ -39,10 +40,24 @@ type lineLocation struct {
 	Line int
 }
 
-func (l lineLocation) Human() string { return fmt.Sprintf("line %d", l.Line) }
+// Human renders just the line number so LocationString produces the
+// familiar grep "path:N" prefix, rather than the redundant "path:line N".
+func (l lineLocation) Human() string { return strconv.Itoa(l.Line) }
 
+// Fields includes "col" alongside "line" for parity with the
+// ":line:1" grep-style suffix HyperlinkURI produces; the column is
+// always 1 for the same reason (a line location has no byte offset).
 func (l lineLocation) Fields() map[string]any {
-	return map[string]any{"line": l.Line}
+	return map[string]any{"line": l.Line, "col": 1}
+}
+
+// HyperlinkURI implements domain.Location with the standard grep-style
+// file/line/column URI; the column is always 1 since a line location
+// only knows the line, not a byte offset within it. The ":line:1" suffix
+// is appended after escaping, not before: it's editor convention, not a
+// URI fragment, and ':' is a legal unescaped path character.
+func (l lineLocation) HyperlinkURI(path string) string {
+	return fmt.Sprintf("%s:%d:1", domain.FileURI(path, ""), l.Line)
 }
 
 func init() {

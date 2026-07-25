@@ -22,6 +22,14 @@ func (l paragraphLocation) Fields() map[string]any {
 	return map[string]any{"paragraph": l.Paragraph}
 }
 
+// HyperlinkURI opens the file with no location fragment: Word only
+// navigates a file:// fragment to a real bookmark already present in
+// the document, so a paragraph number can't jump there and is omitted
+// rather than looking clickable while silently doing nothing.
+func (l paragraphLocation) HyperlinkURI(path string) string {
+	return domain.FileURI(path, "")
+}
+
 // cellLocation implements domain.Location for a table cell.
 type cellLocation struct {
 	Table, Row, Col int
@@ -35,6 +43,13 @@ func (l cellLocation) Fields() map[string]any {
 	return map[string]any{"table": l.Table, "row": l.Row, "col": l.Col}
 }
 
+// HyperlinkURI opens the file with no location fragment; see
+// paragraphLocation.HyperlinkURI for why a table/row/cell address can't
+// be expressed as a navigable fragment in Word.
+func (l cellLocation) HyperlinkURI(path string) string {
+	return domain.FileURI(path, "")
+}
+
 // headerFooterLocation implements domain.Location for a paragraph found
 // in a header or footer part, fully described by a pre-rendered label
 // ("Header 1", "Footer 2").
@@ -44,7 +59,14 @@ type headerFooterLocation struct {
 
 func (l headerFooterLocation) Human() string { return l.Label }
 
-func (l headerFooterLocation) Fields() map[string]any { return map[string]any{} }
+// Fields exposes "label" since the JSON sink no longer emits a generic
+// human-readable location string; the label ("Header 1", "Footer 2") is
+// this location's only identifying information.
+func (l headerFooterLocation) Fields() map[string]any { return map[string]any{"label": l.Label} }
+
+// HyperlinkURI returns "": Word has no addressable location for headers
+// and footers.
+func (l headerFooterLocation) HyperlinkURI(path string) string { return "" }
 
 // footnoteLocation implements domain.Location for one footnote, fully
 // described by a pre-rendered label ("Footnote 3").
@@ -54,7 +76,12 @@ type footnoteLocation struct {
 
 func (l footnoteLocation) Human() string { return l.Label }
 
-func (l footnoteLocation) Fields() map[string]any { return map[string]any{} }
+// Fields exposes "label" ("Footnote 3"); see headerFooterLocation.Fields.
+func (l footnoteLocation) Fields() map[string]any { return map[string]any{"label": l.Label} }
+
+// HyperlinkURI returns "": Word has no addressable location for
+// footnotes.
+func (l footnoteLocation) HyperlinkURI(path string) string { return "" }
 
 // commentLocation implements domain.Location for one comment, fully
 // described by a pre-rendered label ("Comment 2").
@@ -64,7 +91,12 @@ type commentLocation struct {
 
 func (l commentLocation) Human() string { return l.Label }
 
-func (l commentLocation) Fields() map[string]any { return map[string]any{} }
+// Fields exposes "label" ("Comment 2"); see headerFooterLocation.Fields.
+func (l commentLocation) Fields() map[string]any { return map[string]any{"label": l.Label} }
+
+// HyperlinkURI returns "": Word has no addressable location for
+// comments.
+func (l commentLocation) HyperlinkURI(path string) string { return "" }
 
 // send is the callback shape used throughout this file: it delivers one
 // TextUnit and reports whether the caller should keep going (false means

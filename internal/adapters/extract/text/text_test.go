@@ -8,6 +8,35 @@ import (
 	"github.com/laraibg786/ogrep/internal/core/domain"
 )
 
+func TestLineLocationFields(t *testing.T) {
+	loc := lineLocation{Line: 42}
+	fields := loc.Fields()
+	line, ok := fields["line"].(int)
+	if !ok || line != 42 {
+		t.Errorf("Fields()[\"line\"] = %v (%T), want int 42", fields["line"], fields["line"])
+	}
+	col, ok := fields["col"].(int)
+	if !ok || col != 1 {
+		t.Errorf("Fields()[\"col\"] = %v (%T), want int 1", fields["col"], fields["col"])
+	}
+}
+
+func TestLineLocationHyperlinkURI(t *testing.T) {
+	loc := lineLocation{Line: 42}
+	if got, want := loc.HyperlinkURI("/path/file.txt"), "file:///path/file.txt:42:1"; got != want {
+		t.Errorf("HyperlinkURI() = %q, want %q", got, want)
+	}
+}
+
+func TestLineLocationHyperlinkURIEscapesPath(t *testing.T) {
+	loc := lineLocation{Line: 3}
+	got := loc.HyperlinkURI("/path/my file\twith\nspecial chars.txt")
+	want := "file:///path/my%20file%09with%0Aspecial%20chars.txt:3:1"
+	if got != want {
+		t.Errorf("HyperlinkURI() = %q, want %q", got, want)
+	}
+}
+
 func TestSniffRejectsBinary(t *testing.T) {
 	data := []byte("hello\x00world")
 	r := bytes.NewReader(data)
