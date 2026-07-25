@@ -1,27 +1,34 @@
 // Package xlsx implements a ports.DocumentExtractor for MS Excel
-// SpreadsheetML (.xlsx) packages.
+// SpreadsheetML (.xlsx, and by extension the macro-enabled .xlsm --
+// same OOXML container, different content type) packages.
 //
-// An xlsx file is a zip package. The parts this extractor reads are:
+// Cell data is read via github.com/xuri/excelize/v2's Rows() iterator,
+// which streams a worksheet row-by-row from its XML rather than
+// unmarshaling the whole sheet into a DOM -- 100k+ rows is an explicit
+// target scenario for this package (see perf_bench_test.go). Peak
+// memory grows sub-linearly with row count under that iterator (far
+// from a full-DOM implementation's near-linear scaling, but not
+// perfectly flat either, unlike a hand-rolled encoding/xml.Decoder.Token()
+// streamer), at a higher live-heap and allocation cost overall; see
+// perf_bench_test.go's TestExtractPeakMemoryBoundedNotLinear for the
+// measured numbers and the reasoning behind its thresholds. Sheet name
+// resolution, shared strings, formula cached-values, and all the other
+// OOXML cell-type quirks (boolean, error, inline string) are handled by
+// excelize itself rather than reimplemented here.
 //
-//   - xl/workbook.xml: declares each sheet's display name and a
-//     relationship id (r:id) -- NOT its file name directly.
-//   - xl/_rels/workbook.xml.rels: resolves each r:id to the worksheet
-//     part that actually holds it (e.g. "worksheets/sheet3.xml"). Sheet
-//     declaration order and underlying file naming are independent, so
-//     both parts must be read to build an accurate sheet name -> part
-//     path mapping; guessing (e.g. assuming "Sheet1" lives in
-//     sheet1.xml) would be wrong for reordered/renamed sheets.
-//   - xl/sharedStrings.xml: the shared-string table, small relative to
-//     the workbook as a whole, loaded eagerly into memory.
-//   - xl/worksheets/sheetN.xml: the actual cell data, which can be huge
-//     (100k+ rows is an explicit target scenario) and is therefore
-//     streamed with encoding/xml.Decoder.Token() rather than unmarshaled
-//     into a DOM.
-//
-// The package self-registers into registry.Default on init(), mirroring
-// internal/adapters/extract/text/text.go, the reference implementation
-// this extractor's Extract goroutine panic-safety pattern is copied
-// from.
+// Known trade-off: extractAll opens the workbook via excelize.OpenReader,
+// which unconditionally reads the entire file into memory (io.ReadAll)
+// before parsing the zip -- unlike excelize.OpenFile, which streams off
+// a real *os.File and never does this. OpenFile isn't available to us
+// here: ports.DocumentExtractor.Extract is only handed an io.ReaderAt,
+// not the file's path, and there's no public excelize entry point that
+// takes a ReaderAt directly. This means peak memory for very large xlsx
+// files scales with total FILE size (not row count -- see above), which
+// the hand-rolled predecessor's zip.NewReader(ra, size) usage avoided.
+// Accepted for now rather than plumbing a path through the shared
+// extractor interface or spooling ra to a self-managed temp file; revisit
+// if it proves to matter in practice (e.g. very large real-world xlsx
+// files causing memory pressure).
 package xlsx
 
 import (
@@ -29,6 +36,8 @@ import (
 	"context"
 	"fmt"
 	"io"
+
+	"github.com/xuri/excelize/v2"
 
 	"github.com/laraibg786/ogrep/internal/core/domain"
 	"github.com/laraibg786/ogrep/internal/registry"
@@ -45,7 +54,7 @@ func init() {
 func (Extractor) Name() string { return "xlsx" }
 
 // Extensions is an optional fast-path hint consumed by the registry;
-// Sniff (content inspection) is what actually decides.
+// it is not authoritative — Sniff is what actually decides.
 func (Extractor) Extensions() []string { return []string{".xlsx"} }
 
 // Sniff implements ports.DocumentExtractor. It opens the file as a zip
@@ -53,12 +62,10 @@ func (Extractor) Extensions() []string { return []string{".xlsx"} }
 // valid xlsx package must have. Anything that fails to open as a zip at
 // all (including encrypted OOXML, which is actually an OLE/CFB
 // container rather than a zip) is simply not recognized -- Sniff never
-// panics or returns an error, only false.
+// panics or returns an error, only false. This deliberately does NOT go
+// through excelize.OpenReader, which is far heavier than this fast-path
+// contract needs.
 func (Extractor) Sniff(path string, ra io.ReaderAt, size int64) (isXlsx bool) {
-	// Defensive: archive/zip is not expected to panic on malformed
-	// input, but Sniff is a hard "never panic" contract per
-	// ports.DocumentExtractor, so guard it anyway rather than relying
-	// on that expectation holding for every adversarial input.
 	defer func() {
 		if recover() != nil {
 			isXlsx = false
@@ -70,6 +77,16 @@ func (Extractor) Sniff(path string, ra io.ReaderAt, size int64) (isXlsx bool) {
 		return false
 	}
 	return findZipFile(zr, "xl/workbook.xml") != nil
+}
+
+// findZipFile returns the *zip.File with the given exact name, or nil.
+func findZipFile(zr *zip.Reader, name string) *zip.File {
+	for _, f := range zr.File {
+		if f.Name == name {
+			return f
+		}
+	}
+	return nil
 }
 
 // Extract implements ports.DocumentExtractor, streaming every sheet's
@@ -108,36 +125,21 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 	return units, errc
 }
 
-// extractAll opens the zip, resolves sheet names to their part paths,
-// loads shared strings, and streams each sheet's cells in turn.
+// extractAll opens the workbook via excelize and streams each sheet's
+// cells in tab order.
 func extractAll(ctx context.Context, ra io.ReaderAt, size int64, units chan<- domain.TextUnit) error {
-	zr, err := zip.NewReader(ra, size)
+	f, err := excelize.OpenReader(io.NewSectionReader(ra, 0, size))
 	if err != nil {
-		return fmt.Errorf("opening xlsx zip: %w", err)
+		return fmt.Errorf("opening xlsx: %w", err)
 	}
+	defer f.Close()
 
-	sheets, err := readWorkbookSheets(zr)
-	if err != nil {
-		return err
-	}
-
-	sharedStrings, err := readSharedStrings(zr)
-	if err != nil {
-		return err
-	}
-
-	for _, sh := range sheets {
+	for _, sheetName := range f.GetSheetList() {
 		if ctx.Err() != nil {
 			return nil
 		}
-		f := findZipFile(zr, sh.Target)
-		if f == nil {
-			// Dangling sheet->part reference (malformed input); skip
-			// this sheet rather than failing the whole workbook.
-			continue
-		}
-		if err := extractSheet(ctx, f, sh.Name, sharedStrings, units); err != nil {
-			return fmt.Errorf("sheet %q: %w", sh.Name, err)
+		if err := extractSheet(ctx, f, sheetName, units); err != nil {
+			return fmt.Errorf("sheet %q: %w", sheetName, err)
 		}
 	}
 	return nil
