@@ -74,6 +74,18 @@ type Span struct {
 // with the Location describing where it came from. Extractors stream
 // TextUnits over a channel rather than building a full in-memory
 // document tree.
+//
+// Text must never contain an embedded newline. The orchestrator's
+// -A/-B/-C context-line handling and per-match Location reporting both
+// operate at TextUnit granularity, so a unit spanning more than one
+// visual line would make "one line of context" actually mean "the rest
+// of this unit" and collapse what a reader sees as separate lines into
+// one reported location. A format whose underlying structure can put
+// more than one line in one logical place (e.g. a table cell with
+// several paragraphs, or a paragraph with a manual line break) must
+// split those into separate TextUnits sharing the same Location instead
+// of joining them — see internal/adapters/extract/docx's package doc
+// comment for a worked example.
 type TextUnit struct {
 	Location Location
 	Text     string

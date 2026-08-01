@@ -188,6 +188,12 @@ func TestJSONIsLineDelimited(t *testing.T) {
 	}
 }
 
+// TestTerminalWriteMatchIsSingleLine also stands in as confirmation
+// that WriteMatch needs no per-line special-casing on m.Text at all:
+// domain.TextUnit.Text is guaranteed (by contract -- see its doc
+// comment) to never contain an embedded newline, since extractors split
+// multi-line content (a docx table cell, a paragraph's manual line
+// break, an xlsx cell's Alt+Enter) into separate TextUnits instead.
 func TestTerminalWriteMatchIsSingleLine(t *testing.T) {
 	var buf bytes.Buffer
 	term := NewTerminal(&buf, ColorNever, nil, SummaryModeOff)
@@ -300,23 +306,5 @@ func TestTerminalWriteMatchEscapesEscAndBelInLocation(t *testing.T) {
 	want := `a\x1bb\x07c.txt:line 3 hello world` + "\n"
 	if out != want {
 		t.Errorf("got %q, want %q", out, want)
-	}
-}
-
-func TestTerminalWriteMatchPadsContinuationLines(t *testing.T) {
-	var buf bytes.Buffer
-	term := NewTerminal(&buf, ColorNever, nil, SummaryModeOff)
-	match := domain.Match{
-		Path:     "a.txt",
-		Location: testLocation{human: "line 3", fields: map[string]any{}},
-		Text:     "first line\nsecond line",
-	}
-	if err := term.WriteMatch(match); err != nil {
-		t.Fatal(err)
-	}
-	loc := "a.txt:line 3"
-	want := loc + " first line\n" + strings.Repeat(" ", len(loc)+1) + "second line\n"
-	if got := buf.String(); got != want {
-		t.Errorf("got %q, want %q", got, want)
 	}
 }

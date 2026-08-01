@@ -7,7 +7,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/laraibg786/ogrep/internal/core/domain"
 )
@@ -69,8 +68,8 @@ func hyperlink(uri, text string) string {
 	return fmt.Sprintf("\x1b]8;;%s\x1b\\%s\x1b]8;;\x1b\\", uri, text)
 }
 
-// escapeLocationControls rewrites every C0 control byte (0x00-0x1F) and
-// DEL (0x7F) that a POSIX filename may legally contain into a visible
+// escapeControls rewrites every C0 control byte (0x00-0x1F) and DEL
+// (0x7F) that a POSIX filename may legally contain into a visible
 // backslash escape wherever a location is displayed — \n, \r, \t get
 // their familiar short forms, everything else (notably ESC and BEL)
 // gets \xNN. Left raw, a literal newline would split "one line per
@@ -78,9 +77,9 @@ func hyperlink(uri, text string) string {
 // padding math, and an ESC byte could inject an arbitrary terminal
 // escape sequence (e.g. another OSC 8 hyperlink) from a crafted
 // filename. Only the location is escaped this way — matched text is
-// left untouched, since real tabs/newlines in document content are
-// legitimate and already handled by the padding logic.
-func escapeLocationControls(s string) string {
+// left untouched: domain.TextUnit.Text is guaranteed to never contain a
+// newline (see its doc comment), so there is nothing here to flatten.
+func escapeControls(s string) string {
 	if !strings.ContainsFunc(s, isEscapedControl) {
 		return s
 	}
@@ -107,21 +106,16 @@ func escapeLocationControls(s string) string {
 func isEscapedControl(r rune) bool { return r < 0x20 || r == 0x7f }
 
 // WriteMatch implements ports.OutputSink. It prints one grep-style line
-// per match: "path:location text", with the location wrapped in an OSC 8
-// hyperlink when the Location provides one. Text spanning multiple lines
-// (e.g. a docx table cell) has its continuation lines padded to align
-// under the first line's text.
+// per match: "path:location text", with the location wrapped in an OSC
+// 8 hyperlink when the Location provides one and we're writing to a
+// real terminal, and matched spans colorized. m.Text is guaranteed to
+// never contain an embedded newline (see domain.TextUnit's doc
+// comment), so there's exactly one physical output line per match.
 func (t *Terminal) WriteMatch(m domain.Match) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	loc := escapeLocationControls(domain.LocationString(m.Path, m.Location))
-	// RuneCountInString, not len: a byte count would under-pad any
-	// non-ASCII path. This still isn't true terminal column width (wide
-	// CJK glyphs and combining marks can still misalign), but the
-	// project has no wcwidth-style dependency and that's a cosmetic gap
-	// beyond what a rune count buys cheaply here.
-	padding := strings.Repeat(" ", utf8.RuneCountInString(loc)+1)
+	loc := escapeControls(domain.LocationString(m.Path, m.Location))
 
 	// OSC 8 hyperlinks are only meaningful -- and only safe -- when
 	// something is actually going to render them as a terminal escape
@@ -143,57 +137,36 @@ func (t *Terminal) WriteMatch(m domain.Match) error {
 		fmt.Fprintf(t.w, "%s ", display)
 	}
 
-	t.writeHighlighted(m.Text, m.Spans, padding)
+	t.writeHighlighted(m.Text, m.Spans)
 	t.w.WriteByte('\n')
 	return t.w.Flush()
 }
 
-// writeHighlighted writes text with its matched spans colorized (when
-// t.color is set), padding every continuation line (after an embedded
-// newline) with padding so it aligns under the first line's text.
-func (t *Terminal) writeHighlighted(text string, spans []domain.Span, padding string) {
-	lines := strings.Split(text, "\n")
-
-	lineStart := 0
-	for lineIdx, line := range lines {
-		if lineIdx > 0 {
-			t.w.WriteString(padding)
-		}
-		t.writeHighlightedLine(line, lineStart, spans)
-		lineStart += len(line) + 1
-		if lineIdx < len(lines)-1 {
-			t.w.WriteByte('\n')
-		}
-	}
-}
-
-// writeHighlightedLine writes one line of text (the [lineStart,
-// lineStart+len(line)) slice of the original, unsplit text), colorizing
-// whichever spans overlap it.
-func (t *Terminal) writeHighlightedLine(line string, lineStart int, spans []domain.Span) {
+// writeHighlighted writes text with its matched spans colorized, when
+// t.color is set.
+func (t *Terminal) writeHighlighted(text string, spans []domain.Span) {
 	if !t.color || len(spans) == 0 {
-		t.w.WriteString(line)
+		t.w.WriteString(text)
 		return
 	}
-	lineEnd := lineStart + len(line)
 	pos := 0
 	for _, sp := range spans {
-		if sp.End <= lineStart || sp.Start >= lineEnd || sp.End < sp.Start {
+		if sp.End <= 0 || sp.Start >= len(text) || sp.End < sp.Start {
 			continue
 		}
-		spanStart := max(sp.Start-lineStart, 0)
-		spanEnd := min(sp.End-lineStart, len(line))
+		spanStart := max(sp.Start, 0)
+		spanEnd := min(sp.End, len(text))
 		if spanStart < pos {
 			continue // defensively skip malformed/overlapping spans
 		}
 
-		t.w.WriteString(line[pos:spanStart])
+		t.w.WriteString(text[pos:spanStart])
 		t.w.WriteString(ansiMatch)
-		t.w.WriteString(line[spanStart:spanEnd])
+		t.w.WriteString(text[spanStart:spanEnd])
 		t.w.WriteString(ansiReset)
 		pos = spanEnd
 	}
-	t.w.WriteString(line[pos:])
+	t.w.WriteString(text[pos:])
 }
 
 // WriteFileSummary implements ports.OutputSink. Its rendering depends on
