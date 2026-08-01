@@ -102,7 +102,7 @@ func TestIntegrationSearchOrchestrator(t *testing.T) {
 	sort.Strings(humans)
 
 	want := []string{
-		`Slide 2 (Shape "Title 1")`,
+		`Slide 2`,
 		`Slide 2 (Notes)`,
 	}
 	sort.Strings(want)

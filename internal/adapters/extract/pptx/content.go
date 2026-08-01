@@ -37,8 +37,12 @@ type shapeLocation struct {
 	Shape string
 }
 
+// Human deliberately omits the shape name: which shape a match landed in
+// is useful machine-readable metadata (see Fields, which still carries
+// it), but cluttered the console line with `(Shape "Title 1")` for every
+// match without adding much a reader scanning terminal output needs.
 func (l shapeLocation) Human() string {
-	return fmt.Sprintf("Slide %d (Shape %q)", l.Slide, l.Shape)
+	return fmt.Sprintf("Slide %d", l.Slide)
 }
 
 // spans is unused: pptx has no byte-offset-addressable target below the

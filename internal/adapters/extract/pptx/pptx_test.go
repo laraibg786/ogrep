@@ -157,9 +157,15 @@ func TestExtractSlideOrderFollowsSldIdLstNotFilenames(t *testing.T) {
 		}
 	}
 
-	wantHuman3 := `Slide 3 (Shape "Content Placeholder 2")`
+	// Human() deliberately omits the shape name (see shapeLocation.Human's
+	// doc comment) -- the shape name is still available via loc.Shape,
+	// checked above, and via Fields()["shape"] for --json consumers.
+	wantHuman3 := `Slide 3`
 	if got[2].Location.Human() != wantHuman3 {
 		t.Errorf("Location.Human() = %q, want %q", got[2].Location.Human(), wantHuman3)
+	}
+	if fields := got[2].Location.Fields(nil); fields["shape"] != "Content Placeholder 2" {
+		t.Errorf(`Fields()["shape"] = %v, want %q`, fields["shape"], "Content Placeholder 2")
 	}
 }
 
