@@ -135,14 +135,30 @@ func extractSheet(ctx context.Context, f *zip.File, sheetName string, sharedStri
 				cellRef = colLetters(col) + strconv.Itoa(row)
 			}
 
-			unit := domain.TextUnit{
-				Location: cellLocation{Sheet: sheetName, Cell: cellRef, Row: row, Col: col},
-				Text:     text,
-			}
-			select {
-			case units <- unit:
-			case <-ctx.Done():
-				return nil
+			loc := cellLocation{Sheet: sheetName, Cell: cellRef, Row: row, Col: col}
+			// A cell containing a manual line break (Alt+Enter in
+			// Excel) has that break preserved as a literal "\n" byte in
+			// its raw XML text content, which resolveCellText passes
+			// through verbatim. Splitting it into one TextUnit per
+			// line here -- all sharing this same cellLocation, since a
+			// cell has no addressable location finer than that anyway
+			// -- rather than emitting one unit with an embedded "\n",
+			// is what lets -A/-B/-C context lines and per-match
+			// locations operate on each line instead of the whole
+			// multi-line cell blob (see the docx package's identical
+			// reasoning for table cells/paragraph line breaks). Split
+			// is a no-op (one iteration) for the overwhelmingly common
+			// case of a cell with no embedded newline at all.
+			for _, line := range strings.Split(text, "\n") {
+				if line == "" {
+					continue
+				}
+				unit := domain.TextUnit{Location: loc, Text: line}
+				select {
+				case units <- unit:
+				case <-ctx.Done():
+					return nil
+				}
 			}
 		}
 	}

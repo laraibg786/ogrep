@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"testing"
 
@@ -113,5 +114,50 @@ func TestIntegrationOrchestratorRegexAcrossSheets(t *testing.T) {
 	}
 	if len(wantSet) != 0 {
 		t.Errorf("missing expected matches: %v", wantSet)
+	}
+}
+
+// TestIntegrationContextLinesOperateOnRealLinesNotWholeCell is a
+// regression test for the line-splitting fix, mirroring the docx
+// package's identical test: -A/-C context must return the single
+// adjacent LINE within a cell containing a manual line break, not the
+// whole remaining multi-line text of that cell (which is what would
+// happen if a cell's lines were still joined into one TextUnit with an
+// embedded "\n" -- context lines are bounded by TextUnit boundaries).
+func TestIntegrationContextLinesOperateOnRealLinesNotWholeCell(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.xlsx")
+
+	cellXML := `<c r="A1" t="inlineStr"><is><t xml:space="preserve">before line` + "\n" +
+		`needle line` + "\n" +
+		`after line</t></is></c>`
+	data := buildXlsx(t, singleSheetFixture(cellXML))
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("writing fixture file: %v", err)
+	}
+
+	reg := registry.New()
+	reg.Register(xlsx.Extractor{})
+	sink := &fakeSink{}
+	orch := app.New(reg, walk.New(), match.NewFactory(), sink)
+
+	_, err := orch.Run(context.Background(), "needle", []string{dir}, domain.SearchOptions{ContextBefore: 1, ContextAfter: 1})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var texts []string
+	for _, m := range sink.matches {
+		texts = append(texts, m.Text)
+	}
+	sort.Strings(texts)
+	want := []string{"after line", "before line", "needle line"}
+	if len(texts) != len(want) {
+		t.Fatalf("got %d units %v, want %v", len(texts), texts, want)
+	}
+	for i := range want {
+		if texts[i] != want[i] {
+			t.Errorf("unit texts = %v, want %v", texts, want)
+		}
 	}
 }

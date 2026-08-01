@@ -222,6 +222,65 @@ func TestExtractInlineStringCell(t *testing.T) {
 	}
 }
 
+// singleSheetFixture returns a minimal one-sheet workbook whose sole
+// cell's content is supplied by the caller (as an <is><t>...</t></is>
+// inline string, so the caller can embed arbitrary characters including
+// a literal newline).
+func singleSheetFixture(cellXML string) map[string]string {
+	workbookXML := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <sheets>
+    <sheet name="Sheet1" sheetId="1" r:id="rId1"/>
+  </sheets>
+</workbook>`
+	workbookRelsXML := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>`
+	sheetXML := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetData>
+    <row r="1">` + cellXML + `</row>
+  </sheetData>
+</worksheet>`
+
+	return map[string]string{
+		"[Content_Types].xml":        contentTypesXML,
+		"_rels/.rels":                rootRelsXML,
+		"xl/workbook.xml":            workbookXML,
+		"xl/_rels/workbook.xml.rels": workbookRelsXML,
+		"xl/worksheets/sheet1.xml":   sheetXML,
+	}
+}
+
+// TestExtractCellWithManualLineBreakSplitsIntoSeparateUnits is a
+// regression test for the line-splitting fix: a cell containing a
+// manual line break (Alt+Enter in Excel, preserved as a literal "\n"
+// byte in the cell's raw XML text) must be split into one TextUnit per
+// line, all sharing the same cellLocation, rather than emitted as a
+// single unit with an embedded "\n" -- otherwise -A/-B/-C context lines
+// and per-match locations would operate on the whole multi-line cell
+// blob instead of each real line.
+func TestExtractCellWithManualLineBreakSplitsIntoSeparateUnits(t *testing.T) {
+	cellXML := `<c r="A1" t="inlineStr"><is><t xml:space="preserve">line one` + "\n" + `line two</t></is></c>`
+	data := buildXlsx(t, singleSheetFixture(cellXML))
+	units, err := collectUnits(t, data)
+	if err != nil {
+		t.Fatalf("Extract() error = %v", err)
+	}
+	if len(units) != 2 {
+		t.Fatalf("got %d units, want 2: %+v", len(units), units)
+	}
+	if units[0].Text != "line one" || units[1].Text != "line two" {
+		t.Errorf("unit texts = %q, %q, want %q, %q", units[0].Text, units[1].Text, "line one", "line two")
+	}
+	for i, u := range units {
+		if u.Location.Human() != "Sheet1:A1" {
+			t.Errorf("unit %d Location.Human() = %q, want %q", i, u.Location.Human(), "Sheet1:A1")
+		}
+	}
+}
+
 func TestExtractSkipsEmptyCells(t *testing.T) {
 	data := buildXlsx(t, multiSheetFixture())
 	units, err := collectUnits(t, data)
