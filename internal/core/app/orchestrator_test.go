@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/laraibg786/ogrep/internal/adapters/extract/text"
 	"github.com/laraibg786/ogrep/internal/adapters/match"
@@ -27,6 +28,13 @@ type fakeSink struct {
 	mu      sync.Mutex
 	matches []domain.Match
 	summary map[string]int
+
+	// onWriteMatch, if set, is invoked synchronously (while s.mu is
+	// held) on every WriteMatch call, letting a test observe/react to
+	// writes as they happen rather than only after Run returns -- used
+	// to verify matches are streamed to the sink as they're found, not
+	// only after a whole file has been fully processed.
+	onWriteMatch func(domain.Match)
 }
 
 func newFakeSink() *fakeSink {
@@ -37,6 +45,9 @@ func (s *fakeSink) WriteMatch(m domain.Match) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.matches = append(s.matches, m)
+	if s.onWriteMatch != nil {
+		s.onWriteMatch(m)
+	}
 	return nil
 }
 
@@ -480,4 +491,91 @@ func TestOrchestratorSurvivesExtractorGoroutinePanic(t *testing.T) {
 	if !strings.Contains(stderr.String(), "panic") {
 		t.Errorf("expected the panic to be logged as a warning to Stderr, got %q", stderr.String())
 	}
+}
+
+// gatedExtractor is a ports.DocumentExtractor that sends one matching
+// unit per string in lines, blocking after each send until release is
+// signaled -- letting a test control exactly when the "rest of a slow
+// file" becomes available, to observe whether the orchestrator writes
+// each match as it's found or only after the whole file finishes.
+type gatedExtractor struct {
+	lines   []string
+	release <-chan struct{}
+}
+
+func (gatedExtractor) Name() string                                       { return "gated" }
+func (gatedExtractor) Sniff(path string, ra io.ReaderAt, size int64) bool { return true }
+
+func (g gatedExtractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-chan domain.TextUnit, <-chan error) {
+	units := make(chan domain.TextUnit)
+	errc := make(chan error, 1)
+	go func() {
+		defer close(units)
+		defer close(errc)
+		for i, line := range g.lines {
+			select {
+			case units <- domain.TextUnit{Location: fakeLineLocation{line: i + 1}, Text: line}:
+			case <-ctx.Done():
+				return
+			}
+			if i < len(g.lines)-1 {
+				select {
+				case <-g.release:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}
+	}()
+	return units, errc
+}
+
+// TestOrchestratorStreamsMatchesAsFound is a regression test for
+// per-file streaming: a match must reach the sink as soon as it's
+// found, not only after the whole file has been fully extracted. Using
+// gatedExtractor, the second unit is withheld until the test explicitly
+// releases it; if the orchestrator batched matches in memory and wrote
+// them out only once the file finished (the earlier behavior), the
+// first match would never appear in the sink while this test is
+// blocked waiting on it below -- the test would time out instead of
+// observing it.
+func TestOrchestratorStreamsMatchesAsFound(t *testing.T) {
+	dir := t.TempDir()
+	writeFixture(t, filepath.Join(dir, "slow.txt"), "irrelevant; gatedExtractor supplies its own units")
+
+	release := make(chan struct{})
+	extractor := gatedExtractor{lines: []string{"target one", "target two"}, release: release}
+
+	firstWrite := make(chan domain.Match, 1)
+	sink := newFakeSink()
+	sink.onWriteMatch = func(m domain.Match) {
+		select {
+		case firstWrite <- m:
+		default:
+		}
+	}
+
+	orch := app.New(fakeLookup{extractor: extractor}, walk.New(), match.NewFactory(), sink)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := orch.Run(context.Background(), "target", []string{dir}, domain.SearchOptions{}); err != nil {
+			t.Errorf("Run() error = %v", err)
+		}
+	}()
+
+	select {
+	case m := <-firstWrite:
+		if m.Text != "target one" {
+			t.Errorf("first streamed match Text = %q, want %q", m.Text, "target one")
+		}
+	case <-done:
+		t.Fatal("Run finished before the first match was written -- streaming isn't happening")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the first match to stream to the sink")
+	}
+
+	close(release)
+	<-done
 }

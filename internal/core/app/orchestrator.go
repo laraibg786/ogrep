@@ -42,8 +42,22 @@ type SearchOrchestrator struct {
 	// results are never interleaved, even though many files are
 	// processed concurrently. The OutputSink implementations are also
 	// individually safe for concurrent use; this mutex additionally
-	// guarantees a whole file's batch of matches is written atomically
-	// as one unit.
+	// guarantees a whole file's batch of matches is written as one
+	// contiguous unit, matching the grouped-by-file output convention
+	// grep-family tools use even under parallelism.
+	//
+	// searchFile acquires this lazily, on its first actual write (see
+	// lockOnce there), and holds it continuously through the rest of
+	// that file's matches and its final summary line -- not just for a
+	// single quick flush at the end. That's what lets one file's matches
+	// reach the sink as they're found rather than only after the whole
+	// file has been fully read (valuable for a large, slow-to-extract
+	// file), at a real cost: once a file has started writing, every
+	// other file's own writes block until this one finishes, for
+	// whatever's left of its processing after that first match. Because
+	// the lock is only acquired once a file actually has something to
+	// write, a file with no matches never blocks anyone, and files
+	// finishing before another's first match are unaffected.
 	writeMu sync.Mutex
 }
 
@@ -124,8 +138,9 @@ func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []st
 }
 
 // searchFile handles exactly one file: extractor lookup, streaming
-// extraction, matching, and a single atomic write-out of that file's
-// results.
+// extraction, matching, and writing this file's results to o.Sink as
+// they're found (see writeMu's doc comment for why writes, not just
+// extraction, are streamed).
 //
 // The deferred recover() below only catches panics that happen
 // synchronously in THIS goroutine — e.g. inside Registry.For/Sniff, or
@@ -183,30 +198,56 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 
 	units, extractErrc := extractor.Extract(fileCtx, f, size)
 
-	// matches accumulates everything that will be written out for this
-	// file: real matches (with populated Spans) plus, when
-	// -A/-B/-C requested context lines, the surrounding TextUnits
-	// (with empty Spans, the same convention already used by
-	// InvertMatch to mean "no highlighted portion"). realMatchCount
-	// tracks only genuine matches — used for Stats.TotalMatches, the
-	// -m/--max-count cap, and the count reported to -c/--count — so
-	// context lines never inflate those.
-	var matches []domain.Match
+	// realMatchCount tracks only genuine matches -- used for
+	// Stats.TotalMatches, the -m/--max-count cap, and the count reported
+	// to -c/--count -- so context lines (-A/-B/-C) never inflate it.
 	realMatchCount := 0
+
+	// writeLocked is true once this file has acquired o.writeMu; it's
+	// acquired lazily, right before the first actual write this file
+	// makes (see writeMu's doc comment), and released via the deferred
+	// unlockIfLocked below once searchFile returns -- whether that's
+	// after a normal finish or an early return, e.g. a zero-match file
+	// skipping straight past every write.
+	writeLocked := false
+	lockOnce := func() {
+		if !writeLocked {
+			o.writeMu.Lock()
+			writeLocked = true
+		}
+	}
+	defer func() {
+		if writeLocked {
+			o.writeMu.Unlock()
+		}
+	}()
+
+	// write sends m to o.Sink.WriteMatch, unless -l/-c was requested (in
+	// which case only the per-file count that write's callers already
+	// track matters, not the matches themselves).
+	write := func(m domain.Match) {
+		if opts.FilesWithMatches || opts.CountOnly {
+			return
+		}
+		lockOnce()
+		if werr := o.Sink.WriteMatch(m); werr != nil {
+			fmt.Fprintf(stderr, "ogrep: warning: writing match for %s: %v\n", path, werr)
+		}
+	}
 
 	// Context-line bookkeeping for -A/-B/-C, kept bounded (at most
 	// opts.ContextBefore units buffered at any time — never the whole
 	// file):
 	//
 	//   - before is a fixed-capacity ring of the most recently seen
-	//     units, flushed into matches (as context) whenever a match is
-	//     found, then reset.
+	//     units, flushed (as context) whenever a match is found, then
+	//     reset.
 	//   - afterRemaining counts down how many more non-matching units
 	//     to still emit as trailing context after the most recent
 	//     match.
 	//   - lastEmittedIdx is the sequential index of the last unit
-	//     appended to matches; emit() uses it to avoid re-emitting a
-	//     unit that's already present (e.g. a unit that was trailing
+	//     passed to emit; emit uses it to avoid re-emitting a unit
+	//     that's already been written (e.g. a unit that was trailing
 	//     context for one match and would otherwise also be flushed as
 	//     leading context for the next), which is exactly the "two
 	//     matches whose context windows overlap" case that must not
@@ -220,7 +261,7 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 		if idx <= lastEmittedIdx {
 			return
 		}
-		matches = append(matches, domain.Match{Path: path, Format: format, Location: u.Location, Text: u.Text, Spans: spans})
+		write(domain.Match{Path: path, Format: format, Location: u.Location, Text: u.Text, Spans: spans})
 		lastEmittedIdx = idx
 	}
 
@@ -244,7 +285,7 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 			if matched {
 				continue
 			}
-			matches = append(matches, domain.Match{Path: path, Format: format, Location: unit.Location, Text: unit.Text})
+			write(domain.Match{Path: path, Format: format, Location: unit.Location, Text: unit.Text})
 			realMatchCount++
 			if opts.MaxCount > 0 && realMatchCount >= opts.MaxCount {
 				break
@@ -295,25 +336,17 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 		fmt.Fprintf(stderr, "ogrep: warning: %s: %v\n", path, err)
 	}
 
-	if len(matches) == 0 {
+	if realMatchCount == 0 {
 		return
 	}
 
 	atomic.AddInt64(&stats.FilesMatched, 1)
 	atomic.AddInt64(&stats.TotalMatches, int64(realMatchCount))
 
-	o.writeMu.Lock()
-	if !opts.FilesWithMatches && !opts.CountOnly {
-		for _, m := range matches {
-			if werr := o.Sink.WriteMatch(m); werr != nil {
-				fmt.Fprintf(stderr, "ogrep: warning: writing match for %s: %v\n", path, werr)
-			}
-		}
-	}
+	lockOnce()
 	if werr := o.Sink.WriteFileSummary(path, realMatchCount); werr != nil {
 		fmt.Fprintf(stderr, "ogrep: warning: writing summary for %s: %v\n", path, werr)
 	}
-	o.writeMu.Unlock()
 }
 
 // typeAllowed reports whether name (an extractor's Name(), e.g. "docx")
