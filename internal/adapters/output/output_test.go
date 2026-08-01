@@ -3,6 +3,7 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
@@ -198,9 +199,21 @@ func TestTerminalWriteMatchIsSingleLine(t *testing.T) {
 	}
 }
 
+// withFakeTTY makes isTerminal report true for the duration of t,
+// simulating a real terminal without needing to allocate an actual pty
+// -- NewTerminal's own tty *os.File argument still gets passed through
+// unchanged, only the isTerminal(f) check itself is stubbed.
+func withFakeTTY(t *testing.T) {
+	t.Helper()
+	orig := isTerminal
+	isTerminal = func(f *os.File) bool { return true }
+	t.Cleanup(func() { isTerminal = orig })
+}
+
 func TestTerminalWriteMatchWithHyperlink(t *testing.T) {
+	withFakeTTY(t)
 	var buf bytes.Buffer
-	term := NewTerminal(&buf, ColorNever, nil, SummaryModeOff)
+	term := NewTerminal(&buf, ColorNever, os.Stdout, SummaryModeOff)
 	match := domain.Match{
 		Path:     "a.txt",
 		Location: testLocation{human: "line 3", fields: map[string]any{}, hyperlinkURI: "file://a.txt:3:1"},
@@ -219,13 +232,36 @@ func TestTerminalWriteMatchWithHyperlink(t *testing.T) {
 }
 
 func TestTerminalWriteMatchNoHyperlinkWhenURIEmpty(t *testing.T) {
+	withFakeTTY(t)
 	var buf bytes.Buffer
-	term := NewTerminal(&buf, ColorNever, nil, SummaryModeOff)
+	term := NewTerminal(&buf, ColorNever, os.Stdout, SummaryModeOff)
 	if err := term.WriteMatch(sampleMatch()); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(buf.String(), "\x1b]8;;") {
 		t.Error("expected no hyperlink codes when HyperlinkURI returns \"\"")
+	}
+}
+
+// TestTerminalWriteMatchNoHyperlinkWhenNotATTY is a regression test for
+// the safety fix: an OSC 8 hyperlink escape sequence is only emitted
+// when the sink is actually backed by a real terminal. Piped into
+// less/grep/a file (the common case -- no tty override here), the raw
+// escape bytes would otherwise show up as literal noise wrapped around
+// the location instead of being interpreted.
+func TestTerminalWriteMatchNoHyperlinkWhenNotATTY(t *testing.T) {
+	var buf bytes.Buffer
+	term := NewTerminal(&buf, ColorNever, nil, SummaryModeOff)
+	match := domain.Match{
+		Path:     "a.txt",
+		Location: testLocation{human: "line 3", fields: map[string]any{}, hyperlinkURI: "file://a.txt:3:1"},
+		Text:     "hello world",
+	}
+	if err := term.WriteMatch(match); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); strings.Contains(out, "\x1b]8;;") {
+		t.Errorf("expected no hyperlink codes when not writing to a real terminal, got %q", out)
 	}
 }
 

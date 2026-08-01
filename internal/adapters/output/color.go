@@ -19,19 +19,25 @@ const (
 	ColorNever  ColorMode = "never"
 )
 
+// isTerminal reports whether f looks like a real terminal, as opposed
+// to a pipe, redirect, or nil (no backing file at all, e.g. a test
+// writing into a buffer). A package-level var, not a plain func, so
+// tests can substitute it to simulate a real terminal without needing
+// to allocate an actual pty.
+var isTerminal = func(f *os.File) bool {
+	return f != nil && term.IsTerminal(int(f.Fd()))
+}
+
 // shouldColor resolves a ColorMode against whether f looks like a
 // terminal.
 func shouldColor(mode ColorMode, f *os.File) bool {
-	if f == nil {
-		return mode == ColorAlways
-	}
 	switch mode {
 	case ColorAlways:
 		return true
 	case ColorNever:
 		return false
 	default: // auto
-		return term.IsTerminal(int(f.Fd()))
+		return isTerminal(f)
 	}
 }
 

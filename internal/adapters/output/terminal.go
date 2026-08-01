@@ -38,6 +38,7 @@ type Terminal struct {
 	mu      sync.Mutex
 	w       *bufio.Writer
 	color   bool
+	isTTY   bool
 	summary SummaryMode
 }
 
@@ -47,12 +48,18 @@ type Terminal struct {
 // ColorAuto behaves as "never colorize". summary controls how
 // WriteFileSummary renders (see SummaryMode); pass SummaryModeOff for
 // the default per-match output mode.
+//
+// isTTY is tracked separately from color: color can be forced on/off
+// via mode regardless of what's actually backing w (e.g. `--color=always
+// | less -R`), but hyperlinks and the multi-line-match rendering below
+// are only ever appropriate for a real terminal — see WriteMatch.
 func NewTerminal(w io.Writer, mode ColorMode, tty *os.File, summary SummaryMode) *Terminal {
-	color := mode == ColorAlways
-	if tty != nil {
-		color = shouldColor(mode, tty)
+	return &Terminal{
+		w:       bufio.NewWriter(w),
+		color:   shouldColor(mode, tty),
+		isTTY:   isTerminal(tty),
+		summary: summary,
 	}
-	return &Terminal{w: bufio.NewWriter(w), color: color, summary: summary}
 }
 
 // hyperlink wraps text in an OSC 8 terminal hyperlink escape sequence
@@ -116,9 +123,18 @@ func (t *Terminal) WriteMatch(m domain.Match) error {
 	// beyond what a rune count buys cheaply here.
 	padding := strings.Repeat(" ", utf8.RuneCountInString(loc)+1)
 
+	// OSC 8 hyperlinks are only meaningful -- and only safe -- when
+	// something is actually going to render them as a terminal escape
+	// sequence; piped into less/grep/a file without -R, the raw
+	// \x1b]8;;...\x1b\ bytes would otherwise show up as literal noise
+	// wrapped around the location. Gated on isTTY, not color: a forced
+	// `--color=always` doesn't make hyperlinks any safer to emit into a
+	// non-terminal, so it doesn't affect this decision either.
 	display := loc
-	if uri := m.Location.HyperlinkURI(m.Path, m.Spans); uri != "" {
-		display = hyperlink(uri, loc)
+	if t.isTTY {
+		if uri := m.Location.HyperlinkURI(m.Path, m.Spans); uri != "" {
+			display = hyperlink(uri, loc)
+		}
 	}
 
 	if t.color {
