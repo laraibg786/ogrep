@@ -53,11 +53,11 @@ func (j *JSON) WriteMatch(m domain.Match) error {
 		"type":   "match",
 		"path":   m.Path,
 		"format": m.Format,
-		"uri":    m.Location.HyperlinkURI(m.Path),
+		"uri":    m.Location.HyperlinkURI(m.Path, m.Spans),
 		"text":   m.Text,
 		"spans":  spans,
 	}
-	for k, v := range m.Location.Fields() {
+	for k, v := range m.Location.Fields(m.Spans) {
 		rec[k] = v
 	}
 	return j.enc.Encode(rec)

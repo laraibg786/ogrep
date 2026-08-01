@@ -27,26 +27,41 @@ func FileURI(path, fragment string) string {
 // It is implemented by each extraction plugin (docx/pptx/xlsx/text), not
 // by core: a docx paragraph location knows about paragraph numbers, an
 // xlsx cell location knows about sheet/cell references, and so on. Core
-// only ever calls Human and Fields, so adding a new format's location
-// shape never requires changing domain, the orchestrator, or the output
-// sinks.
+// only ever calls Human, Fields, and HyperlinkURI, so adding a new
+// format's location shape never requires changing domain, the
+// orchestrator, or the output sinks.
+//
+// Fields and HyperlinkURI both take the Match's Spans: a Location is
+// shared by every Match drawn from the same TextUnit (e.g. every match on
+// one text line, or within one docx paragraph), but where exactly the
+// match starts within that unit's Text varies per Match. A format that
+// can turn a byte offset into a real column (currently just text, via
+// spans[0].Start) uses spans to report and link to the precise match
+// position rather than always the start of the unit; a format with
+// nothing byte-addressable (docx, pptx, xlsx) simply ignores spans, same
+// as it always could ignore path if it had no use for it.
 type Location interface {
 	// Human returns a pre-rendered, format-appropriate description (e.g.
-	// `Slide 12 (Shape "Title")`, `Sheet1!B45`, `Paragraph 88`, `line
-	// 42`) that output sinks can print directly.
+	// `Slide 12`, `Sheet1!B45`, `Paragraph 88`, `line 42:9`) that output
+	// sinks can print directly.
 	Human() string
 
 	// Fields returns format-specific structured data for machine-readable
 	// output (e.g. JSON), keyed by field name (e.g. "slide", "shape").
-	Fields() map[string]any
+	// spans is the triggering Match's Spans (see the interface doc for
+	// why); pass nil when calling outside of a specific match (e.g. a
+	// Location-only unit test) to get the unit-level default.
+	Fields(spans []Span) map[string]any
 
 	// HyperlinkURI returns the URI a terminal should open (via an OSC 8
-	// hyperlink) when this location is clicked, given the file's path.
-	// Each format decides its own scheme (e.g. a text line links to
-	// `file://path:line:1`, an xlsx cell to `file://path#Sheet!Cell`).
-	// Return "" if the format has nothing sensible to link to (e.g. a
-	// docx header/footer); output sinks then print the location plain.
-	HyperlinkURI(path string) string
+	// hyperlink) when this location is clicked, given the file's path and
+	// the triggering Match's Spans (see the interface doc). Each format
+	// decides its own scheme (e.g. a text line links to
+	// `file://path:line:col` using spans[0].Start, an xlsx cell to
+	// `file://path#Sheet!Cell`). Return "" if the format has nothing
+	// sensible to link to (e.g. a docx header/footer); output sinks then
+	// print the location plain.
+	HyperlinkURI(path string, spans []Span) string
 }
 
 // Span is a byte-offset range [Start, End) into the Text of the TextUnit

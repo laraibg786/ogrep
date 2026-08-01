@@ -21,7 +21,7 @@ func TestLocationHyperlinkURI(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.loc.HyperlinkURI(path); got != tc.want {
+			if got := tc.loc.HyperlinkURI(path, nil); got != tc.want {
 				t.Errorf("HyperlinkURI() = %q, want %q", got, tc.want)
 			}
 		})
@@ -30,7 +30,7 @@ func TestLocationHyperlinkURI(t *testing.T) {
 
 func TestShapeLocationHyperlinkURIEscapesPath(t *testing.T) {
 	loc := shapeLocation{Slide: 2, Shape: "Title"}
-	got := loc.HyperlinkURI("/path/my presentation.pptx")
+	got := loc.HyperlinkURI("/path/my presentation.pptx", nil)
 	want := "file:///path/my%20presentation.pptx#2"
 	if got != want {
 		t.Errorf("HyperlinkURI() = %q, want %q", got, want)

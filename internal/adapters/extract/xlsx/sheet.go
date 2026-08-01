@@ -26,11 +26,13 @@ type cellLocation struct {
 // colon that already precedes it.
 func (l cellLocation) Human() string { return fmt.Sprintf("%s:%s", l.Sheet, l.Cell) }
 
-func (l cellLocation) Fields() map[string]any {
+func (l cellLocation) Fields(spans []domain.Span) map[string]any {
 	return map[string]any{"sheet": l.Sheet, "cell": l.Cell, "row": l.Row, "col": l.Col}
 }
 
-func (l cellLocation) HyperlinkURI(path string) string {
+// spans is unused: a cell is already the finest-grained addressable
+// target xlsx has, regardless of where within its text a match starts.
+func (l cellLocation) HyperlinkURI(path string, spans []domain.Span) string {
 	return domain.FileURI(path, quotedSheetRef(l.Sheet)+"!"+l.Cell)
 }
 

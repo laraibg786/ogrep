@@ -17,9 +17,9 @@ type testLocation struct {
 	hyperlinkURI string
 }
 
-func (l testLocation) Human() string                   { return l.human }
-func (l testLocation) Fields() map[string]any          { return l.fields }
-func (l testLocation) HyperlinkURI(path string) string { return l.hyperlinkURI }
+func (l testLocation) Human() string                                        { return l.human }
+func (l testLocation) Fields(spans []domain.Span) map[string]any            { return l.fields }
+func (l testLocation) HyperlinkURI(path string, spans []domain.Span) string { return l.hyperlinkURI }
 
 func sampleMatch() domain.Match {
 	return domain.Match{

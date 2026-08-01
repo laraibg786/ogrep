@@ -137,7 +137,7 @@ func TestExtractResolvesSheetNamesViaRels(t *testing.T) {
 	if u.Text != "Hello World" {
 		t.Errorf("Sheet1!A1 text = %q, want %q (multi-run shared string)", u.Text, "Hello World")
 	}
-	fields := u.Location.Fields()
+	fields := u.Location.Fields(nil)
 	if fields["sheet"] != "Sheet1" || fields["cell"] != "A1" {
 		t.Errorf("Sheet1!A1 Fields = %+v", fields)
 	}
@@ -150,7 +150,7 @@ func TestExtractResolvesSheetNamesViaRels(t *testing.T) {
 	if b.Text != "Second Sheet Value" {
 		t.Errorf("Budget 2024!B45 text = %q, want %q", b.Text, "Second Sheet Value")
 	}
-	bFields := b.Location.Fields()
+	bFields := b.Location.Fields(nil)
 	if bFields["col"] != 2 || bFields["row"] != 45 {
 		t.Errorf("Budget 2024!B45 Col/Row = %v/%v, want 2/45", bFields["col"], bFields["row"])
 	}

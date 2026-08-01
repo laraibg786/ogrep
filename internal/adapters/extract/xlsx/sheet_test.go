@@ -4,14 +4,14 @@ import "testing"
 
 func TestCellLocationHyperlinkURI(t *testing.T) {
 	loc := cellLocation{Sheet: "Sheet1", Cell: "B45"}
-	if got, want := loc.HyperlinkURI("/path/data.xlsx"), "file:///path/data.xlsx#Sheet1!B45"; got != want {
+	if got, want := loc.HyperlinkURI("/path/data.xlsx", nil), "file:///path/data.xlsx#Sheet1!B45"; got != want {
 		t.Errorf("HyperlinkURI() = %q, want %q", got, want)
 	}
 }
 
 func TestCellLocationHyperlinkURIEscapesPathAndSheetName(t *testing.T) {
 	loc := cellLocation{Sheet: "My Sheet", Cell: "B45"}
-	got := loc.HyperlinkURI("/path/my data.xlsx")
+	got := loc.HyperlinkURI("/path/my data.xlsx", nil)
 	want := "file:///path/my%20data.xlsx#%27My%20Sheet%27!B45"
 	if got != want {
 		t.Errorf("HyperlinkURI() = %q, want %q", got, want)

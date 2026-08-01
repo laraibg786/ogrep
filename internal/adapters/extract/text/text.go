@@ -45,19 +45,37 @@ type lineLocation struct {
 func (l lineLocation) Human() string { return strconv.Itoa(l.Line) }
 
 // Fields includes "col" alongside "line" for parity with the
-// ":line:1" grep-style suffix HyperlinkURI produces; the column is
-// always 1 for the same reason (a line location has no byte offset).
-func (l lineLocation) Fields() map[string]any {
-	return map[string]any{"line": l.Line, "col": 1}
+// ":line:col" grep-style suffix HyperlinkURI produces. The column is the
+// first span's start converted to a 1-based byte offset within the
+// line, since spans are the triggering Match's byte-offset ranges into
+// this unit's Text (which for a text line IS the real line content, not
+// a synthesized string) — falls back to column 1 when spans is empty
+// (e.g. a Location-only test calling Fields(nil) directly).
+func (l lineLocation) Fields(spans []domain.Span) map[string]any {
+	return map[string]any{"line": l.Line, "col": startColumn(spans)}
 }
 
 // HyperlinkURI implements domain.Location with the standard grep-style
-// file/line/column URI; the column is always 1 since a line location
-// only knows the line, not a byte offset within it. The ":line:1" suffix
-// is appended after escaping, not before: it's editor convention, not a
-// URI fragment, and ':' is a legal unescaped path character.
-func (l lineLocation) HyperlinkURI(path string) string {
-	return fmt.Sprintf("%s:%d:1", domain.FileURI(path, ""), l.Line)
+// file/line/column URI, landing on the first matched span's actual
+// starting byte within the line rather than always column 1 -- an
+// editor opening this URI lands the cursor at the match, not just
+// somewhere on the right line. When more than one span matched on this
+// line, the first one's start is used (the same convention rg-style
+// tools use when multiple matches occur on a single line). The
+// ":line:col" suffix is appended after escaping, not before: it's editor
+// convention, not a URI fragment, and ':' is a legal unescaped path
+// character.
+func (l lineLocation) HyperlinkURI(path string, spans []domain.Span) string {
+	return fmt.Sprintf("%s:%d:%d", domain.FileURI(path, ""), l.Line, startColumn(spans))
+}
+
+// startColumn converts the first span's byte-offset Start into a 1-based
+// column, or 1 if spans is empty.
+func startColumn(spans []domain.Span) int {
+	if len(spans) == 0 {
+		return 1
+	}
+	return spans[0].Start + 1
 }
 
 func init() {

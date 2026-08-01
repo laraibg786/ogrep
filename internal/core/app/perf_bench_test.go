@@ -63,9 +63,11 @@ type fakeLineLocation struct {
 	line int
 }
 
-func (l fakeLineLocation) Human() string          { return fmt.Sprintf("line %d", l.line) }
-func (l fakeLineLocation) Fields() map[string]any { return map[string]any{"line": l.line} }
-func (l fakeLineLocation) HyperlinkURI(path string) string {
+func (l fakeLineLocation) Human() string { return fmt.Sprintf("line %d", l.line) }
+func (l fakeLineLocation) Fields(spans []domain.Span) map[string]any {
+	return map[string]any{"line": l.line}
+}
+func (l fakeLineLocation) HyperlinkURI(path string, spans []domain.Span) string {
 	return fmt.Sprintf("%s:%d:1", domain.FileURI(path, ""), l.line)
 }
 

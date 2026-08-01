@@ -282,7 +282,7 @@ func TestOrchestratorContextLines(t *testing.T) {
 	var gotLines []int
 	var gotHasSpans []bool
 	for _, m := range sink.matches {
-		gotLines = append(gotLines, m.Location.Fields()["line"].(int))
+		gotLines = append(gotLines, m.Location.Fields(m.Spans)["line"].(int))
 		gotHasSpans = append(gotHasSpans, len(m.Spans) > 0)
 	}
 
@@ -326,7 +326,7 @@ func TestOrchestratorContextLinesAfterOnly(t *testing.T) {
 
 	var gotLines []int
 	for _, m := range sink.matches {
-		gotLines = append(gotLines, m.Location.Fields()["line"].(int))
+		gotLines = append(gotLines, m.Location.Fields(m.Spans)["line"].(int))
 	}
 	want := []int{1, 2, 3}
 	if len(gotLines) != len(want) {

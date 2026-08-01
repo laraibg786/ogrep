@@ -20,19 +20,16 @@ files in it) case-insensitively:
 
 ```
 $ ogrep -i budget .
-todo.txt:line 1
-Finish the quarterly budget review
-notes/meeting.txt:line 1
-Budget approved for Q3.
-notes/meeting.txt:line 2
-Next steps: circulate the budget doc.
+todo.txt:1 Finish the quarterly budget review
+notes/meeting.txt:1 Budget approved for Q3.
+notes/meeting.txt:2 Next steps: circulate the budget doc.
 ```
 
-Each match is printed as a `path:location` header line followed by the
-matched text — `location` is format-specific (`line N` for text,
-`Paragraph N` for docx, `Slide N (Shape "...")` for pptx, `Sheet1!B45`
-for xlsx). Add `-c`/`--count` to print just a match count per file
-instead:
+Each match is printed as one hyperlinked `path:location` line followed
+by the matched text — `location` is format-specific (the line number
+for text, `Paragraph N` for docx, `Slide N (Shape "...")` for pptx,
+`Sheet1!B45` for xlsx). Add `-c`/`--count` to print just a match count
+per file instead:
 
 ```
 $ ogrep -i -c budget .

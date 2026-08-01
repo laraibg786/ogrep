@@ -41,15 +41,17 @@ func (l shapeLocation) Human() string {
 	return fmt.Sprintf("Slide %d (Shape %q)", l.Slide, l.Shape)
 }
 
-func (l shapeLocation) Fields() map[string]any {
+// spans is unused: pptx has no byte-offset-addressable target below the
+// shape level, so every match within a shape reports the same location.
+func (l shapeLocation) Fields(spans []domain.Span) map[string]any {
 	return map[string]any{"slide": l.Slide, "shape": l.Shape}
 }
 
 // HyperlinkURI uses a bare slide-number fragment (`#N`), which is the
 // convention PowerPoint and viewers actually honor when opening a local
 // file:// link at a specific slide (unlike `#slide=N`, which isn't
-// recognized).
-func (l shapeLocation) HyperlinkURI(path string) string {
+// recognized). spans is unused for the same reason as Fields.
+func (l shapeLocation) HyperlinkURI(path string, spans []domain.Span) string {
 	return domain.FileURI(path, strconv.Itoa(l.Slide))
 }
 
@@ -63,13 +65,13 @@ func (l notesLocation) Human() string {
 	return fmt.Sprintf("Slide %d (Notes)", l.Slide)
 }
 
-func (l notesLocation) Fields() map[string]any {
+func (l notesLocation) Fields(spans []domain.Span) map[string]any {
 	return map[string]any{"slide": l.Slide}
 }
 
 // HyperlinkURI returns "": PowerPoint has no addressable location for
 // speaker notes.
-func (l notesLocation) HyperlinkURI(path string) string { return "" }
+func (l notesLocation) HyperlinkURI(path string, spans []domain.Span) string { return "" }
 
 // paragraphEmitter is invoked once per completed paragraph (on the
 // <a:p> closing tag) with the name of its enclosing shape and the

@@ -96,7 +96,7 @@ func TestLocationHyperlinkURI(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.loc.HyperlinkURI(path); got != tc.want {
+			if got := tc.loc.HyperlinkURI(path, nil); got != tc.want {
 				t.Errorf("HyperlinkURI() = %q, want %q", got, tc.want)
 			}
 		})
@@ -115,7 +115,7 @@ func TestLabelOnlyLocationsExposeLabelInFields(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.loc.Fields()["label"]; got != tc.want {
+			if got := tc.loc.Fields(nil)["label"]; got != tc.want {
 				t.Errorf("Fields()[\"label\"] = %v, want %q", got, tc.want)
 			}
 		})
@@ -124,7 +124,7 @@ func TestLabelOnlyLocationsExposeLabelInFields(t *testing.T) {
 
 func TestParagraphLocationHyperlinkURIEscapesPath(t *testing.T) {
 	loc := paragraphLocation{Paragraph: 1}
-	got := loc.HyperlinkURI("/path/my doc.docx")
+	got := loc.HyperlinkURI("/path/my doc.docx", nil)
 	want := "file:///path/my%20doc.docx"
 	if got != want {
 		t.Errorf("HyperlinkURI() = %q, want %q", got, want)

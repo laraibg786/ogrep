@@ -117,7 +117,7 @@ func (t *Terminal) WriteMatch(m domain.Match) error {
 	padding := strings.Repeat(" ", utf8.RuneCountInString(loc)+1)
 
 	display := loc
-	if uri := m.Location.HyperlinkURI(m.Path); uri != "" {
+	if uri := m.Location.HyperlinkURI(m.Path, m.Spans); uri != "" {
 		display = hyperlink(uri, loc)
 	}
 
