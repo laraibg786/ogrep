@@ -236,10 +236,13 @@ func TestExtractTableNotDoubleCounted(t *testing.T) {
 		t.Errorf("paragraph 1 = %+v, want text 'After table' Paragraph 2", paragraphs[1])
 	}
 
-	// 3 non-blank cells: R1C1, R1C2, and the merged R2C1a/R2C1b cell.
-	// The 4th cell (row 2, col 2) is blank and must be skipped.
-	if len(cells) != 3 {
-		t.Fatalf("got %d table cells, want 3: %+v", len(cells), cells)
+	// 4 non-blank cell units: R1C1, R1C2, and the row-2 cell's two
+	// paragraphs (R2C1a, R2C1b) as SEPARATE units sharing one
+	// cellLocation -- not joined into one unit -- so -A/-B/-C context
+	// lines operate on each paragraph as its own line. The 4th cell
+	// (row 2, col 2) is blank and must be skipped.
+	if len(cells) != 4 {
+		t.Fatalf("got %d table cell units, want 4: %+v", len(cells), cells)
 	}
 
 	wantCell := cellLocation{Table: 1, Row: 1, Col: 1}
@@ -251,8 +254,11 @@ func TestExtractTableNotDoubleCounted(t *testing.T) {
 		t.Errorf("cell 1 = %+v, want text R1C2 loc %+v", cells[1], wantCell2)
 	}
 	wantCell3 := cellLocation{Table: 1, Row: 2, Col: 1}
-	if cells[2].Text != "R2C1a\nR2C1b" || cells[2].Location != wantCell3 {
-		t.Errorf("cell 2 = %+v, want text 'R2C1a\\nR2C1b' loc %+v", cells[2], wantCell3)
+	if cells[2].Text != "R2C1a" || cells[2].Location != wantCell3 {
+		t.Errorf("cell 2 = %+v, want text R2C1a loc %+v", cells[2], wantCell3)
+	}
+	if cells[3].Text != "R2C1b" || cells[3].Location != wantCell3 {
+		t.Errorf("cell 3 = %+v, want text R2C1b loc %+v", cells[3], wantCell3)
 	}
 }
 
@@ -329,6 +335,13 @@ func TestExtractHeaderFooterFootnoteComment(t *testing.T) {
 	}
 }
 
+// TestExtractTabAndBreak also confirms the line-splitting behavior: a
+// w:br splits the single w:p above into two TextUnits, both tagged
+// Paragraph 1 (the same paragraph, just two lines within it) -- not one
+// unit with an embedded "\n" -- so -A/-B/-C context lines and per-match
+// locations both operate on real lines. w:tab, in contrast, is inline
+// text (a literal tab character), not a line break, so it stays within
+// its unit's Text unsplit.
 func TestExtractTabAndBreak(t *testing.T) {
 	doc := `<?xml version="1.0" encoding="UTF-8"?><w:document ` + wNS + `><w:body>` +
 		`<w:p><w:r><w:t>a</w:t><w:tab/><w:t>b</w:t><w:br/><w:t>c</w:t></w:r></w:p>` +
@@ -336,12 +349,20 @@ func TestExtractTabAndBreak(t *testing.T) {
 	data := buildDocx(t, map[string]string{"word/document.xml": doc})
 
 	got := extractAll(t, data)
-	if len(got) != 1 {
-		t.Fatalf("got %d units, want 1", len(got))
+	if len(got) != 2 {
+		t.Fatalf("got %d units, want 2: %+v", len(got), got)
 	}
-	want := "a\tb\nc"
-	if got[0].Text != want {
-		t.Errorf("text = %q, want %q", got[0].Text, want)
+	if got[0].Text != "a\tb" {
+		t.Errorf("unit 0 text = %q, want %q", got[0].Text, "a\tb")
+	}
+	if got[1].Text != "c" {
+		t.Errorf("unit 1 text = %q, want %q", got[1].Text, "c")
+	}
+	for i, u := range got {
+		loc, ok := u.Location.(paragraphLocation)
+		if !ok || loc.Paragraph != 1 {
+			t.Errorf("unit %d Location = %+v, want paragraphLocation{Paragraph: 1}", i, u.Location)
+		}
 	}
 }
 

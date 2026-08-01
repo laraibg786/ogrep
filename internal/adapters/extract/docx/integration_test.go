@@ -141,3 +141,73 @@ func TestDocxThroughRealOrchestrator(t *testing.T) {
 		}
 	}
 }
+
+// TestDocxContextLinesOperateOnRealLinesNotWholeCell is a regression
+// test for the line-splitting fix: -A/-C context must return the single
+// adjacent LINE, not the whole remaining text of a multi-paragraph table
+// cell (which is what would happen if the cell's paragraphs were still
+// joined into one TextUnit with an embedded "\n" -- context lines are
+// bounded by TextUnit boundaries, so a multi-paragraph unit would make
+// "one line of context" mean "the entire rest of the cell").
+func TestDocxContextLinesOperateOnRealLinesNotWholeCell(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "report.docx")
+
+	doc := `<?xml version="1.0" encoding="UTF-8"?><w:document ` + wNS + `><w:body>` +
+		`<w:tbl><w:tr><w:tc>` +
+		`<w:p><w:r><w:t>before line</w:t></w:r></w:p>` +
+		`<w:p><w:r><w:t>needle line</w:t></w:r></w:p>` +
+		`<w:p><w:r><w:t>after line</w:t></w:r></w:p>` +
+		`</w:tc></w:tr></w:tbl>` +
+		`</w:body></w:document>`
+	parts := map[string]string{
+		"[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+			`<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">` +
+			`<Default Extension="xml" ContentType="application/xml"/></Types>`,
+		"_rels/.rels": `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
+			`<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`,
+		"word/document.xml": doc,
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for name, content := range parts {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatalf("creating zip part %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(content)); err != nil {
+			t.Fatalf("writing zip part %s: %v", name, err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("closing zip writer: %v", err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("writing fixture file: %v", err)
+	}
+
+	reg := registry.New()
+	reg.Register(docx.Extractor{})
+	sink := &fakeSink{}
+	orch := app.New(reg, walk.New(), match.NewFactory(), sink)
+
+	_, err := orch.Run(context.Background(), "needle", []string{dir}, domain.SearchOptions{ContextBefore: 1, ContextAfter: 1})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	var texts []string
+	for _, m := range sink.matches {
+		texts = append(texts, m.Text)
+	}
+	sort.Strings(texts)
+	want := []string{"after line", "before line", "needle line"}
+	if len(texts) != len(want) {
+		t.Fatalf("got %d units %v, want %v", len(texts), texts, want)
+	}
+	for i := range want {
+		if texts[i] != want[i] {
+			t.Errorf("unit texts = %v, want %v", texts, want)
+		}
+	}
+}

@@ -200,9 +200,10 @@ func (rt *runTracker) exitDrawing() {
 }
 
 // handleStart processes a StartElement that is one of the "leaf content"
-// elements common to every part (t/tab/br/cr/r), given the current
-// paragraph state. It returns true if it consumed the token itself
-// (i.e. the caller doesn't need to do anything else for it).
+// elements common to every part (t/tab/r), given the current paragraph
+// state. w:br/w:cr are NOT handled here even though they're leaf content
+// too — see splitOnBreak below for why they need caller-specific
+// handling instead of just appending to curPara.
 func (rt *runTracker) handleStart(dec *xml.Decoder, t xml.StartElement) error {
 	switch t.Name.Local {
 	case "r":
@@ -224,12 +225,24 @@ func (rt *runTracker) handleStart(dec *xml.Decoder, t xml.StartElement) error {
 		if rt.inRun && rt.curPara != nil {
 			rt.curPara.WriteString("\t")
 		}
-	case "br", "cr":
-		if rt.inRun && rt.curPara != nil {
-			rt.curPara.WriteString("\n")
-		}
 	}
 	return nil
+}
+
+// splitOnBreak handles a w:br/w:cr (Word's manual line break, inserted
+// within a single paragraph — distinct from a new w:p, which is a new
+// paragraph entirely): it flushes whatever's accumulated in curPara so
+// far as its own segment via flush, then resets curPara so text after
+// the break starts a fresh segment. Each caller below defines flush to
+// emit that segment as its own TextUnit immediately, rather than joining
+// it into the eventual paragraph/cell text with an embedded "\n" — see
+// the package doc comment for why: -A/-B/-C context lines need to
+// operate on real lines, not on a whole multi-line blob.
+func splitOnBreak(rt *runTracker, flush func(string)) {
+	if rt.inRun && rt.curPara != nil {
+		flush(rt.curPara.String())
+		rt.curPara.Reset()
+	}
 }
 
 func (rt *runTracker) handleEnd(t xml.EndElement) {
@@ -254,18 +267,25 @@ type tableState struct {
 	num, row, col int
 }
 
-// cellState accumulates the (possibly multi-paragraph) text of one open
-// w:tc, to be emitted as a single TextUnit when the cell closes.
+// cellState tracks which table/row/col a currently-open w:tc addresses.
+// Unlike before, it no longer accumulates the cell's text across
+// paragraphs — each paragraph (and each break-delimited segment within
+// one) is emitted as its own TextUnit as soon as it's known; see
+// extractDocumentBody's flushSegment.
 type cellState struct {
 	table, row, col int
-	builder         strings.Builder
 }
 
 // extractDocumentBody streams word/document.xml, emitting one
 // paragraphLocation-tagged unit per top-level body paragraph and one
-// cellLocation-tagged unit per non-blank table cell (concatenating all
-// of the cell's paragraphs). See the package doc comment for the
-// numbering and double-counting rules this implements.
+// cellLocation-tagged unit per non-blank table-cell paragraph. A
+// paragraph containing a manual line break (w:br/w:cr) is split into
+// multiple units at that point, all sharing the same Location — Word
+// has no addressable location finer than a paragraph/cell anyway, and
+// splitting is what lets -A/-B/-C context lines and per-line matching
+// work the way they do for every other format, instead of operating on
+// a whole multi-paragraph/multi-line blob. See the package doc comment
+// for the numbering and double-counting rules this implements.
 func extractDocumentBody(f *zip.File, out send) error {
 	rc, err := f.Open()
 	if err != nil {
@@ -280,6 +300,35 @@ func extractDocumentBody(f *zip.File, out send) error {
 	var tableCounter int
 	var tableStack []tableState
 	var cellStack []*cellState
+	aborted := false
+
+	// flushSegment emits one paragraph-or-cell segment as its own
+	// TextUnit, called both mid-paragraph (on a w:br/w:cr split) and
+	// once more at the paragraph's own closing tag for whatever text
+	// remains after the last such split.
+	flushSegment := func(text string) {
+		if n := len(cellStack); n > 0 {
+			if strings.TrimSpace(text) == "" {
+				return
+			}
+			cell := cellStack[n-1]
+			unit := domain.TextUnit{
+				Location: cellLocation{Table: cell.table, Row: cell.row, Col: cell.col},
+				Text:     text,
+			}
+			if !out(unit) {
+				aborted = true
+			}
+		} else {
+			unit := domain.TextUnit{
+				Location: paragraphLocation{Paragraph: paragraphNum},
+				Text:     text,
+			}
+			if !out(unit) {
+				aborted = true
+			}
+		}
+	}
 
 	for {
 		tok, err := dec.Token()
@@ -302,6 +351,9 @@ func extractDocumentBody(f *zip.File, out send) error {
 			switch t.Name.Local {
 			case "p":
 				rt.curPara = &strings.Builder{}
+				if len(cellStack) == 0 {
+					paragraphNum++
+				}
 			case "tbl":
 				tableCounter++
 				tableStack = append(tableStack, tableState{num: tableCounter})
@@ -315,6 +367,11 @@ func extractDocumentBody(f *zip.File, out send) error {
 					tableStack[n-1].col++
 					top := tableStack[n-1]
 					cellStack = append(cellStack, &cellState{table: top.num, row: top.row, col: top.col})
+				}
+			case "br", "cr":
+				splitOnBreak(rt, flushSegment)
+				if aborted {
+					return nil
 				}
 			default:
 				if err := rt.handleStart(dec, t); err != nil {
@@ -336,36 +393,13 @@ func extractDocumentBody(f *zip.File, out send) error {
 					text = rt.curPara.String()
 				}
 				rt.curPara = nil
-				if n := len(cellStack); n > 0 {
-					cell := cellStack[n-1]
-					if cell.builder.Len() > 0 {
-						cell.builder.WriteString("\n")
-					}
-					cell.builder.WriteString(text)
-				} else {
-					paragraphNum++
-					unit := domain.TextUnit{
-						Location: paragraphLocation{Paragraph: paragraphNum},
-						Text:     text,
-					}
-					if !out(unit) {
-						return nil
-					}
+				flushSegment(text)
+				if aborted {
+					return nil
 				}
 			case "tc":
 				if n := len(cellStack); n > 0 {
-					cell := cellStack[n-1]
 					cellStack = cellStack[:n-1]
-					text := cell.builder.String()
-					if strings.TrimSpace(text) != "" {
-						unit := domain.TextUnit{
-							Location: cellLocation{Table: cell.table, Row: cell.row, Col: cell.col},
-							Text:     text,
-						}
-						if !out(unit) {
-							return nil
-						}
-					}
 				}
 			case "tbl":
 				if n := len(tableStack); n > 0 {
@@ -382,9 +416,10 @@ func extractDocumentBody(f *zip.File, out send) error {
 
 // extractHeaderFooterPart streams a word/header*.xml or word/footer*.xml
 // part, emitting one headerFooterLocation-tagged unit per non-blank
-// paragraph, all sharing the given label (e.g. "Header 1"). Table
-// structure inside headers/footers is deliberately not tracked; see the
-// package doc comment for why that's safe here.
+// paragraph (or break-delimited segment within one — see splitOnBreak),
+// all sharing the given label (e.g. "Header 1"). Table structure inside
+// headers/footers is deliberately not tracked; see the package doc
+// comment for why that's safe here.
 func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 	rc, err := f.Open()
 	if err != nil {
@@ -394,6 +429,17 @@ func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 
 	dec := xml.NewDecoder(rc)
 	rt := &runTracker{}
+	aborted := false
+
+	flushSegment := func(text string) {
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		unit := domain.TextUnit{Location: headerFooterLocation{Label: label}, Text: text}
+		if !out(unit) {
+			aborted = true
+		}
+	}
 
 	for {
 		tok, err := dec.Token()
@@ -416,6 +462,11 @@ func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 			switch t.Name.Local {
 			case "p":
 				rt.curPara = &strings.Builder{}
+			case "br", "cr":
+				splitOnBreak(rt, flushSegment)
+				if aborted {
+					return nil
+				}
 			default:
 				if err := rt.handleStart(dec, t); err != nil {
 					return fmt.Errorf("decoding %s: %w", f.Name, err)
@@ -436,14 +487,9 @@ func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 					text = rt.curPara.String()
 				}
 				rt.curPara = nil
-				if strings.TrimSpace(text) != "" {
-					unit := domain.TextUnit{
-						Location: headerFooterLocation{Label: label},
-						Text:     text,
-					}
-					if !out(unit) {
-						return nil
-					}
+				flushSegment(text)
+				if aborted {
+					return nil
 				}
 			default:
 				rt.handleEnd(t)
@@ -455,9 +501,10 @@ func extractHeaderFooterPart(f *zip.File, label string, out send) error {
 }
 
 // extractFootnoteLike streams word/footnotes.xml or word/comments.xml,
-// where elemName is "footnote" or "comment" respectively: each such
-// element becomes one TextUnit whose Location is built by newLoc,
-// concatenating all of its paragraphs (joined by "\n"). Location.Human
+// where elemName is "footnote" or "comment" respectively: each non-blank
+// paragraph (or break-delimited segment within one — see splitOnBreak)
+// found inside a w:footnote/w:comment element becomes its own TextUnit,
+// all sharing that element's Location built by newLoc. Location.Human
 // uses the element's own w:id attribute ("Footnote 3"/"Comment 2"),
 // falling back to a running counter if that attribute is missing or
 // unparsable as a plain string (in practice w:id is always present on
@@ -473,9 +520,19 @@ func extractFootnoteLike(f *zip.File, elemName string, newLoc func(label string)
 	rt := &runTracker{}
 
 	var inItem bool
-	var itemBuilder strings.Builder
 	var itemID string
 	var counter int
+	aborted := false
+
+	flushSegment := func(text string) {
+		if !inItem || strings.TrimSpace(text) == "" {
+			return
+		}
+		unit := domain.TextUnit{Location: newLoc(fmt.Sprintf("%s %s", labelPrefix, itemID)), Text: text}
+		if !out(unit) {
+			aborted = true
+		}
+	}
 
 	for {
 		tok, err := dec.Token()
@@ -498,7 +555,6 @@ func extractFootnoteLike(f *zip.File, elemName string, newLoc func(label string)
 			switch t.Name.Local {
 			case elemName:
 				inItem = true
-				itemBuilder.Reset()
 				counter++
 				itemID = attrValue(t, "id")
 				if itemID == "" {
@@ -507,6 +563,11 @@ func extractFootnoteLike(f *zip.File, elemName string, newLoc func(label string)
 			case "p":
 				if inItem {
 					rt.curPara = &strings.Builder{}
+				}
+			case "br", "cr":
+				splitOnBreak(rt, flushSegment)
+				if aborted {
+					return nil
 				}
 			default:
 				if err := rt.handleStart(dec, t); err != nil {
@@ -524,26 +585,14 @@ func extractFootnoteLike(f *zip.File, elemName string, newLoc func(label string)
 			switch t.Name.Local {
 			case "p":
 				if inItem && rt.curPara != nil {
-					if itemBuilder.Len() > 0 {
-						itemBuilder.WriteString("\n")
-					}
-					itemBuilder.WriteString(rt.curPara.String())
+					flushSegment(rt.curPara.String())
 					rt.curPara = nil
+					if aborted {
+						return nil
+					}
 				}
 			case elemName:
-				if inItem {
-					text := itemBuilder.String()
-					inItem = false
-					if strings.TrimSpace(text) != "" {
-						unit := domain.TextUnit{
-							Location: newLoc(fmt.Sprintf("%s %s", labelPrefix, itemID)),
-							Text:     text,
-						}
-						if !out(unit) {
-							return nil
-						}
-					}
-				}
+				inItem = false
 			default:
 				rt.handleEnd(t)
 			}
