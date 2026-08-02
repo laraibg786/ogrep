@@ -88,7 +88,7 @@ func (Extractor) Name() string { return "text" }
 // Extensions is an optional fast-path hint consumed by the registry; it
 // is not authoritative — Sniff is what actually decides.
 func (Extractor) Extensions() []string {
-	return []string{".txt", ".md", ".log", ".csv", ".json", ".yaml", ".yml", ".xml", ".ini", ".conf", ".cfg", ".go", ".py", ".js", ".ts", ".java", ".c", ".h", ".cpp", ".rs", ""}
+	return []string{".txt", ".md", ".log", ".csv", ".yaml", ".yml", ".xml", ".ini", ".conf", ".cfg", ".go", ".py", ".js", ".ts", ".java", ".c", ".h", ".cpp", ".rs", ""}
 }
 
 // Sniff implements ports.DocumentExtractor. It treats any file that

@@ -1,8 +1,9 @@
 # ogrep
 
-A ripgrep-style command-line search tool that searches plain text files
-as well as MS Office documents (`.docx`, `.pptx`, `.xlsx`), streaming
-through each document instead of loading it fully into memory.
+A ripgrep-style command-line search tool that searches plain text
+files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), and JSON
+(`.json`), streaming through each document instead of loading it fully
+into memory.
 
 ```
 ogrep [flags] PATTERN [PATH...]
@@ -28,11 +29,11 @@ notes/meeting.txt:2 Next steps: circulate the budget doc.
 Each match is printed as one `path:location` line followed by the
 matched text — `location` is format-specific (the line number for
 text, `Paragraph N` for docx, `Slide N (Shape "...")` for pptx,
-`Sheet1!B45` for xlsx). When stdout is a real terminal, the location
-is also wrapped in an OSC 8 hyperlink so an editor can jump straight
-to the match; piped or redirected output prints the plain text with
-no hyperlink. Add `-c`/`--count` to print just a match count per file
-instead:
+`Sheet1!B45` for xlsx, a jq-pasteable path like `.foo.bar[2]` for
+json). When stdout is a real terminal, the location is also wrapped in
+an OSC 8 hyperlink so an editor can jump straight to the match; piped
+or redirected output prints the plain text with no hyperlink. Add
+`-c`/`--count` to print just a match count per file instead:
 
 ```
 $ ogrep -i -c budget .
@@ -46,6 +47,21 @@ extension, and read JSON instead of terminal output:
 ```
 $ ogrep --type xlsx --json total .
 ```
+
+JSON files are flattened into `<path> = <value>` lines using jq path
+syntax, so a matched line's path can be pasted straight into `jq` for
+further extraction:
+
+```
+$ ogrep foo-bar config.json
+config.json:.["foo-bar"] .["foo-bar"] = 1
+$ jq '.["foo-bar"]' config.json
+1
+```
+
+(Non-identifier keys — dashes, spaces, leading digits — render in the
+bracketed `.["key"]` form since jq's bare `.key` shorthand would
+otherwise misparse them, e.g. as subtraction for a key like `foo-bar`.)
 
 By default, `.gitignore` and `.ogrepignore` files are respected the
 same way git respects `.gitignore` — nested files layer, with a
