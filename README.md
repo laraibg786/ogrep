@@ -2,7 +2,7 @@
 
 A ripgrep-style command-line search tool that searches plain text
 files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), OpenDocument
-files (`.odt`), and structured data files (`.json`, `.jsonc`,
+files (`.odt`, `.ods`), and structured data files (`.json`, `.jsonc`,
 `.jsonl`/`.ndjson`, `.yaml`/`.yml`, `.xml`). Most formats stream
 through each document instead of loading it fully into memory; YAML
 and JSONC are the exceptions, each parsed as a size-bounded in-memory
@@ -21,7 +21,7 @@ literal search. Run `ogrep --help` for the full flag reference
 ## Usage examples
 
 Search a directory tree (plain text and any
-`.docx`/`.pptx`/`.xlsx`/`.odt` files in it) case-insensitively:
+`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods` files in it) case-insensitively:
 
 ```
 $ ogrep -i budget .
@@ -34,10 +34,11 @@ Each match is printed as one `path:location` line followed by the
 matched text — `location` is format-specific (the line number for
 text, `Paragraph N` for docx, `Slide N (Shape "...")` for pptx,
 `Sheet1!B45` for xlsx, a jq/yq-pasteable path like `.foo.bar[2]` for
-json/yaml, an XPath like `/root/items/item[3]/name` for xml). odt
-mirrors docx: it reports the nearest preceding heading instead of a
-bare paragraph number, same as docx's own location model. When
-stdout is a real terminal, the location is also wrapped in an OSC 8
+json/yaml, an XPath like `/root/items/item[3]/name` for xml). The
+OpenDocument formats mirror their MS Office counterparts: odt reports
+the nearest preceding heading (same idea as docx's `Paragraph N`, just
+navigable), and ods reports `Sheet1:B45` (same cell addressing as
+xlsx). When stdout is a real terminal, the location is also wrapped in an OSC 8
 hyperlink so an editor can jump straight to the match; piped or
 redirected output prints the plain text with no hyperlink. Add
 `-c`/`--count` to print just a match count per file instead:
@@ -62,6 +63,28 @@ match reports the nearest heading, e.g.:
 $ ogrep --type odt "quarterly review" report.odt
 report.odt:Q3 Financials Finish the quarterly review by Friday
 ```
+
+An ods cell match reports its sheet and cell reference, exactly like
+xlsx:
+
+```
+$ ogrep --type ods total budget.ods
+budget.ods:Summary:B12 Total
+```
+
+ODF's `table:number-columns-repeated`/`table:number-rows-repeated`
+compactly encode "this cell/row repeats N times", almost always used
+for a large trailing run of empty padding cells that LibreOffice
+commonly writes. ogrep reports a repeated cell/row group only once, at
+its first cell/row reference, matching that common blank-padding case
+-- but this means a repeated run of genuinely identical, non-blank
+content (e.g. a column holding the same constant value, or a
+filled-down formula result) is also only reported once, not once per
+occurrence: a search will find the value but won't report every
+individual cell it actually appears in. The JSON/`Fields()` output does
+include a `repeat` count alongside the one reported location, so a
+caller that needs to know how many times a value actually occurs can
+at least learn that, even though only one location is emitted.
 
 JSON and YAML files are flattened into `<path> = <value>` lines using
 jq/yq path syntax, so a matched line's path can be pasted straight into
