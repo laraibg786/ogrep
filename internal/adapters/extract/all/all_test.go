@@ -1,8 +1,10 @@
 package all
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/laraibg786/ogrep/internal/registry"
@@ -155,6 +157,49 @@ func TestOversizedYAMLFallsBackToText(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "big.yaml")
 	if got := claim(t, path, yamlContent); got != "text" {
 		t.Errorf("big.yaml: claimed by %q, want fallback to %q for an oversized file", got, "text")
+	}
+}
+
+// TestValidXMLClaimedByDedicatedPlugin mirrors
+// TestValidJSONClaimedByDedicatedPlugin for XML.
+func TestValidXMLClaimedByDedicatedPlugin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.xml")
+	if got := claim(t, path, []byte(`<root><a>1</a></root>`)); got != "xml" {
+		t.Errorf("doc.xml: claimed by %q, want %q", got, "xml")
+	}
+}
+
+// TestMalformedXMLFallsBackToText mirrors TestMalformedJSONFallsBackToText
+// for XML: broken from the very first token (an unclosed opening tag),
+// so xmldoc's own cheap Sniff (a single-token trial decode, the same
+// tradeoff jsondoc makes) correctly declines it.
+func TestMalformedXMLFallsBackToText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "broken.xml")
+	if got := claim(t, path, []byte(`<root`)); got != "text" {
+		t.Errorf("broken.xml: claimed by %q, want fallback to %q", got, "text")
+	}
+}
+
+// TestLargeXMLIsClaimedByXmldocNotText confirms xmldoc's streaming
+// design actually delivers what it promises: a file well beyond any size
+// a DOM-based parser would want to buffer whole is still claimed by
+// xmldoc, not declined into a text-plugin fallback -- there's no size
+// gate to trigger one (unlike yamldoc). Uses a few thousand elements
+// (large enough to meaningfully exceed a "toy" fixture, small enough not
+// to slow the test suite down) rather than the tens-of-megabytes scale
+// of yamldoc's own size-gate test, since there's no threshold here to
+// cross in the first place.
+func TestLargeXMLIsClaimedByXmldocNotText(t *testing.T) {
+	var sb strings.Builder
+	sb.WriteString("<root>")
+	for i := 0; i < 20_000; i++ {
+		fmt.Fprintf(&sb, "<item id=\"%d\">value %d</item>", i, i)
+	}
+	sb.WriteString("</root>")
+
+	path := filepath.Join(t.TempDir(), "large.xml")
+	if got := claim(t, path, []byte(sb.String())); got != "xml" {
+		t.Errorf("large.xml: claimed by %q, want %q", got, "xml")
 	}
 }
 

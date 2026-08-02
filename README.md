@@ -2,10 +2,10 @@
 
 A ripgrep-style command-line search tool that searches plain text
 files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), and structured
-data files (`.json`, `.yaml`/`.yml`). Most formats stream through each
-document instead of loading it fully into memory; YAML is the
-exception, parsed as a size-bounded in-memory tree (capped at 64 MiB
-per file) since it has no streaming parser that also tracks the
+data files (`.json`, `.yaml`/`.yml`, `.xml`). Most formats stream
+through each document instead of loading it fully into memory; YAML is
+the exception, parsed as a size-bounded in-memory tree (capped at 64
+MiB per file) since it has no streaming parser that also tracks the
 path/line information this tool needs.
 
 ```
@@ -33,11 +33,11 @@ Each match is printed as one `path:location` line followed by the
 matched text — `location` is format-specific (the line number for
 text, `Paragraph N` for docx, `Slide N (Shape "...")` for pptx,
 `Sheet1!B45` for xlsx, a jq/yq-pasteable path like `.foo.bar[2]` for
-json/yaml). When stdout is a real terminal, the location is also
-wrapped in an OSC 8 hyperlink so an editor can jump straight to the
-match; piped or redirected output prints the plain text with no
-hyperlink. Add `-c`/`--count` to print just a match count per file
-instead:
+json/yaml, an XPath like `/root/items/item[3]/name` for xml). When
+stdout is a real terminal, the location is also wrapped in an OSC 8
+hyperlink so an editor can jump straight to the match; piped or
+redirected output prints the plain text with no hyperlink. Add
+`-c`/`--count` to print just a match count per file instead:
 
 ```
 $ ogrep -i -c budget .
@@ -66,6 +66,8 @@ $ jq '.["foo-bar"]' config.json
 (Non-identifier keys — dashes, spaces, leading digits — render in the
 bracketed `.["key"]` form since jq's bare `.key` shorthand would
 otherwise misparse them, e.g. as subtraction for a key like `foo-bar`.)
+XML matches are instead located by an absolute XPath expression, e.g.
+`/root/items/item[3]/name`.
 
 Multi-document YAML files (`---`-separated) get each document's paths
 prefixed with `.document[N]` (0-indexed) to keep them distinct — e.g.
