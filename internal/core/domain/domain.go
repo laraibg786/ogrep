@@ -91,6 +91,22 @@ type TextUnit struct {
 	Text     string
 }
 
+// TextUnitChannelBuffer is the capacity every extractor should give the
+// channel it streams TextUnits over. An unbuffered channel makes every
+// single unit a full goroutine rendezvous between the extractor's
+// producer goroutine and the orchestrator's consumer, which profiling
+// showed costs a large share of total CPU time (mostly in the runtime's
+// channel/select machinery) independent of the actual matching work.
+// Buffering lets a producer get ahead of a consumer that's momentarily
+// busy (e.g. running the matcher against a unit) instead of blocking on
+// every send. 256 was chosen from a buffer-size sweep (0 to 2048) against
+// a realistic-density search pattern: wall-clock time improves sharply up
+// to roughly this size, then plateaus, then very large buffers (2048)
+// start giving it back -- likely GC/allocator pressure from holding that
+// many in-flight units' string data live at once outweighing any further
+// reduction in channel-send contention.
+const TextUnitChannelBuffer = 256
+
 // Match is a single matched TextUnit, carrying the byte-offset Spans (in
 // Text) that the matcher found. Path and Format are set by the
 // orchestrator (which is the only layer that knows the file path and

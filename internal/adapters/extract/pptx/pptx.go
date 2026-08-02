@@ -80,7 +80,7 @@ func (Extractor) Sniff(path string, ra io.ReaderAt, size int64) (ok bool) {
 // possibly-large shape), and a notesLocation-tagged unit for paragraphs
 // found in that slide's associated notes part, if any.
 func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-chan domain.TextUnit, <-chan error) {
-	units := make(chan domain.TextUnit)
+	units := make(chan domain.TextUnit, domain.TextUnitChannelBuffer)
 	errc := make(chan error, 1)
 
 	go func() {

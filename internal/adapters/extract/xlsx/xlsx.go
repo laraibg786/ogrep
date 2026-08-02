@@ -75,7 +75,7 @@ func (Extractor) Sniff(path string, ra io.ReaderAt, size int64) (isXlsx bool) {
 // Extract implements ports.DocumentExtractor, streaming every sheet's
 // cells as TextUnits in workbook tab order.
 func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-chan domain.TextUnit, <-chan error) {
-	units := make(chan domain.TextUnit)
+	units := make(chan domain.TextUnit, domain.TextUnitChannelBuffer)
 	errc := make(chan error, 1)
 
 	go func() {

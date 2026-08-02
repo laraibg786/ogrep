@@ -213,7 +213,7 @@ func readAll(ra io.ReaderAt, size int64) ([]byte, error) {
 // Extract implements ports.DocumentExtractor, streaming the parsed
 // document's flattened key/value pairs as TextUnits.
 func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-chan domain.TextUnit, <-chan error) {
-	units := make(chan domain.TextUnit)
+	units := make(chan domain.TextUnit, domain.TextUnitChannelBuffer)
 	errc := make(chan error, 1)
 
 	go func() {
