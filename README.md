@@ -1,13 +1,13 @@
 # ogrep
 
 A ripgrep-style command-line search tool that searches plain text
-files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), and structured
-data files (`.json`, `.jsonc`, `.jsonl`/`.ndjson`, `.yaml`/`.yml`,
-`.xml`). Most formats stream through each document instead of loading
-it fully into memory; YAML and JSONC are the exceptions, each parsed
-as a size-bounded in-memory tree (capped at 64 MiB per file) since
-neither has a streaming parser that also tracks the path/line
-information this tool needs.
+files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), OpenDocument
+files (`.odt`), and structured data files (`.json`, `.jsonc`,
+`.jsonl`/`.ndjson`, `.yaml`/`.yml`, `.xml`). Most formats stream
+through each document instead of loading it fully into memory; YAML
+and JSONC are the exceptions, each parsed as a size-bounded in-memory
+tree (capped at 64 MiB per file) since neither has a streaming parser
+that also tracks the path/line information this tool needs.
 
 ```
 ogrep [flags] PATTERN [PATH...]
@@ -20,8 +20,8 @@ literal search. Run `ogrep --help` for the full flag reference
 
 ## Usage examples
 
-Search a directory tree (plain text and any `.docx`/`.pptx`/`.xlsx`
-files in it) case-insensitively:
+Search a directory tree (plain text and any
+`.docx`/`.pptx`/`.xlsx`/`.odt` files in it) case-insensitively:
 
 ```
 $ ogrep -i budget .
@@ -34,7 +34,9 @@ Each match is printed as one `path:location` line followed by the
 matched text — `location` is format-specific (the line number for
 text, `Paragraph N` for docx, `Slide N (Shape "...")` for pptx,
 `Sheet1!B45` for xlsx, a jq/yq-pasteable path like `.foo.bar[2]` for
-json/yaml, an XPath like `/root/items/item[3]/name` for xml). When
+json/yaml, an XPath like `/root/items/item[3]/name` for xml). odt
+mirrors docx: it reports the nearest preceding heading instead of a
+bare paragraph number, same as docx's own location model. When
 stdout is a real terminal, the location is also wrapped in an OSC 8
 hyperlink so an editor can jump straight to the match; piped or
 redirected output prints the plain text with no hyperlink. Add
@@ -51,6 +53,14 @@ extension, and read JSON instead of terminal output:
 
 ```
 $ ogrep --type xlsx --json total .
+```
+
+The OpenDocument equivalents work the same way. An odt paragraph
+match reports the nearest heading, e.g.:
+
+```
+$ ogrep --type odt "quarterly review" report.odt
+report.odt:Q3 Financials Finish the quarterly review by Friday
 ```
 
 JSON and YAML files are flattened into `<path> = <value>` lines using
