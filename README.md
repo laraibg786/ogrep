@@ -2,14 +2,15 @@
 
 A ripgrep-style command-line search tool that searches plain text
 files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), OpenDocument
-files (`.odt`, `.ods`, `.odp`), and structured data files (`.json`,
-`.jsonc`, `.jsonl`/`.ndjson`, `.yaml`/`.yml`, `.xml`, `.toml`). Most
-formats stream through each document instead of loading it fully into
-memory; YAML, JSONC, and TOML are the exceptions, each parsed as a
-size-bounded in-memory tree (capped at 64 MiB per file for YAML/JSONC,
-8 MiB for TOML -- real-world TOML files are config-file-sized, not
-tens of megabytes) since none of them has a streaming parser that also
-tracks the path/line information this tool needs.
+files (`.odt`, `.ods`, `.odp`), and structured data/markup files
+(`.json`, `.jsonc`, `.jsonl`/`.ndjson`, `.yaml`/`.yml`, `.xml`,
+`.toml`, `.html`/`.htm`/`.xhtml`). Most formats stream through each
+document instead of loading it fully into memory; YAML, JSONC, and
+TOML are the exceptions, each parsed as a size-bounded in-memory tree
+(capped at 64 MiB per file for YAML/JSONC, 8 MiB for TOML -- real-world
+TOML files are config-file-sized, not tens of megabytes) since none of
+them has a streaming parser that also tracks the path/line information
+this tool needs.
 
 ```
 ogrep [flags] PATTERN [PATH...]
@@ -116,6 +117,27 @@ bracketed `.["key"]` form since jq's bare `.key` shorthand would
 otherwise misparse them, e.g. as subtraction for a key like `foo-bar`.)
 XML matches are instead located by an absolute XPath expression, e.g.
 `/root/items/item[3]/name`.
+
+`.html`/`.htm` files are searched too, tolerating real-world markup an
+XML parser would reject outright (unclosed tags, missing `<html>`/
+`<body>` wrappers, and the like) — `<script>`/`<style>` contents are
+never searched. Matches are located by a real source line, the same
+grep-style `path:N` convention plain text uses (column is always
+reported as `1`: the matched text has already had entities decoded and
+whitespace collapsed by this point, so a byte offset into it doesn't
+correspond to a real source column); a synthesized, CSS-selector-like
+tag path from the document root down to the matched element (e.g.
+`html>body>div:nth-of-type(1)>p:nth-of-type(1)`) is also tracked and
+available as supplementary structural info in `--json` output (the
+`htmlpath` field), but no longer replaces the line number as the
+primary, console-facing location:
+
+```
+$ ogrep support page.html
+page.html:10 Contact support for help.
+$ ogrep --json support page.html
+{"col":1,"format":"html","htmlpath":"html:nth-of-type(1)>body:nth-of-type(1)>div:nth-of-type(1)>p:nth-of-type(1)","line":10,"path":"page.html","spans":[{"start":8,"end":15}],"text":"Contact support for help.","type":"match","uri":"file://page.html:10:1"}
+```
 
 Multi-document YAML files (`---`-separated) get each document's paths
 prefixed with `.document[N]` (0-indexed) to keep them distinct — e.g.

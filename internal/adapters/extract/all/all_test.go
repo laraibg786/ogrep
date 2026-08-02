@@ -306,6 +306,29 @@ func TestProseTOMLFallsBackToText(t *testing.T) {
 	}
 }
 
+// TestValidHTMLClaimedByDedicatedPlugin mirrors
+// TestValidXMLClaimedByDedicatedPlugin for HTML, covering both the
+// ".html" and ".htm" extensions.
+func TestValidHTMLClaimedByDedicatedPlugin(t *testing.T) {
+	for _, name := range []string{"doc.html", "doc.htm"} {
+		path := filepath.Join(t.TempDir(), name)
+		if got := claim(t, path, []byte(`<html><body><p>hi</p></body></html>`)); got != "html" {
+			t.Errorf("%s: claimed by %q, want %q", name, got, "html")
+		}
+	}
+}
+
+// TestPlainTextWithHTMLExtensionFallsBackToText confirms a .html file
+// whose content doesn't look like markup at all (no leading '<') is
+// declined by htmldoc's Sniff and falls back to the text extractor,
+// rather than being claimed by no one.
+func TestPlainTextWithHTMLExtensionFallsBackToText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes.html")
+	if got := claim(t, path, []byte("just some plain notes, not markup\n")); got != "text" {
+		t.Errorf("notes.html: claimed by %q, want fallback to %q", got, "text")
+	}
+}
+
 // TestExistingOOXMLAndTextDispatchUnaffected is a regression test
 // confirming the new structured-data plugins don't interfere with
 // dispatch for the pre-existing formats: an unrelated, genuinely
