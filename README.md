@@ -2,12 +2,12 @@
 
 A ripgrep-style command-line search tool that searches plain text
 files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), and structured
-data files (`.json`, `.jsonc`, `.yaml`/`.yml`, `.xml`). Most formats
-stream through each document instead of loading it fully into memory;
-YAML and JSONC are the exceptions, each parsed as a size-bounded
-in-memory tree (capped at 64 MiB per file) since neither has a
-streaming parser that also tracks the path/line information this tool
-needs.
+data files (`.json`, `.jsonc`, `.jsonl`/`.ndjson`, `.yaml`/`.yml`,
+`.xml`). Most formats stream through each document instead of loading
+it fully into memory; YAML and JSONC are the exceptions, each parsed
+as a size-bounded in-memory tree (capped at 64 MiB per file) since
+neither has a streaming parser that also tracks the path/line
+information this tool needs.
 
 ```
 ogrep [flags] PATTERN [PATH...]
@@ -81,13 +81,25 @@ $ yq eval 'select(document_index==1).limits.["foo-bar"]' config.yaml
 ```
 
 `.jsonc` (JSON With Commas and Comments — comments, trailing commas)
-is also supported. JSONC comments are matched like any other text,
-located by line and column rather than a jq path (they aren't
-addressable JSON values):
+and `.jsonl`/`.ndjson` (JSON Lines — one JSON value per line) are also
+supported. JSONC comments are matched like any other text, located by
+line and column rather than a jq path (they aren't addressable JSON
+values):
 
 ```
 $ ogrep "owning team" config.jsonc
 config.jsonc:line 2:25 (comment) // owning team: billing-core
+```
+
+JSONL matches use the same jq-path notation as plain JSON — with no
+per-line prefix, since `jq`'s default input mode already applies a
+filter to every top-level value in the file, so `jq '.user'` run
+against a whole `.jsonl` file works exactly as expected without any
+document-index selector:
+
+```
+$ ogrep Grace events.jsonl
+events.jsonl:.user (line 2:17) .user = "Grace"
 ```
 
 By default, `.gitignore` and `.ogrepignore` files are respected the

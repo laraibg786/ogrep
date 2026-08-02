@@ -249,6 +249,32 @@ func TestJSONCFallsBackToJSONNotTextWhenContentLooksLikeJSON(t *testing.T) {
 	}
 }
 
+// TestValidJSONLClaimedByDedicatedPlugin mirrors
+// TestValidJSONClaimedByDedicatedPlugin for JSONL/NDJSON, covering both
+// the ".jsonl" and ".ndjson" extensions.
+func TestValidJSONLClaimedByDedicatedPlugin(t *testing.T) {
+	content := []byte(`{"a":1}` + "\n" + `{"a":2}` + "\n")
+	for _, name := range []string{"doc.jsonl", "doc.ndjson"} {
+		path := filepath.Join(t.TempDir(), name)
+		if got := claim(t, path, content); got != "jsonl" {
+			t.Errorf("%s: claimed by %q, want %q", name, got, "jsonl")
+		}
+	}
+}
+
+// TestMalformedJSONLFallsBackToText mirrors
+// TestMalformedJSONFallsBackToText for JSONL: jsonldoc inherits
+// jsondoc's exact first-token-trial-decode tradeoff (it delegates its
+// own Sniff to jsondoc's Sniff on just the first line), so content
+// broken from its first line's first token correctly falls back to
+// text.
+func TestMalformedJSONLFallsBackToText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "broken.jsonl")
+	if got := claim(t, path, []byte("totally not json despite the extension\n")); got != "text" {
+		t.Errorf("broken.jsonl: claimed by %q, want fallback to %q", got, "text")
+	}
+}
+
 // TestExistingOOXMLAndTextDispatchUnaffected is a regression test
 // confirming the new structured-data plugins don't interfere with
 // dispatch for the pre-existing formats: an unrelated, genuinely
