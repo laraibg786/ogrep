@@ -2,11 +2,11 @@
 // that a single import of this package wires up the full set of
 // supported formats via each plugin's self-registering init().
 //
-// Currently registered: docx, pptx, xlsx (MS Office formats), odt, ods
-// (OpenDocument formats), jsondoc, xmldoc, yamldoc, jsoncdoc, jsonldoc
-// (structured data formats), and text (the plain-text, catch-all
-// fallback). Add a new format's blank import here when its plugin
-// package is ready.
+// Currently registered: docx, pptx, xlsx (MS Office formats), odt, ods,
+// odp (OpenDocument formats), jsondoc, xmldoc, yamldoc, jsoncdoc,
+// jsonldoc (structured data formats), and text (the plain-text,
+// catch-all fallback). Add a new format's blank import here when its
+// plugin package is ready.
 package all
 
 import (
@@ -14,6 +14,7 @@ import (
 	_ "github.com/laraibg786/ogrep/internal/adapters/extract/jsoncdoc"
 	_ "github.com/laraibg786/ogrep/internal/adapters/extract/jsondoc"
 	_ "github.com/laraibg786/ogrep/internal/adapters/extract/jsonldoc"
+	_ "github.com/laraibg786/ogrep/internal/adapters/extract/odp"
 	_ "github.com/laraibg786/ogrep/internal/adapters/extract/ods"
 	_ "github.com/laraibg786/ogrep/internal/adapters/extract/odt"
 	_ "github.com/laraibg786/ogrep/internal/adapters/extract/pptx"

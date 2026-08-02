@@ -2,12 +2,13 @@
 
 A ripgrep-style command-line search tool that searches plain text
 files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), OpenDocument
-files (`.odt`, `.ods`), and structured data files (`.json`, `.jsonc`,
-`.jsonl`/`.ndjson`, `.yaml`/`.yml`, `.xml`). Most formats stream
-through each document instead of loading it fully into memory; YAML
-and JSONC are the exceptions, each parsed as a size-bounded in-memory
-tree (capped at 64 MiB per file) since neither has a streaming parser
-that also tracks the path/line information this tool needs.
+files (`.odt`, `.ods`, `.odp`), and structured data files (`.json`,
+`.jsonc`, `.jsonl`/`.ndjson`, `.yaml`/`.yml`, `.xml`). Most formats
+stream through each document instead of loading it fully into memory;
+YAML and JSONC are the exceptions, each parsed as a size-bounded
+in-memory tree (capped at 64 MiB per file) since neither has a
+streaming parser that also tracks the path/line information this tool
+needs.
 
 ```
 ogrep [flags] PATTERN [PATH...]
@@ -21,7 +22,8 @@ literal search. Run `ogrep --help` for the full flag reference
 ## Usage examples
 
 Search a directory tree (plain text and any
-`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods` files in it) case-insensitively:
+`.docx`/`.pptx`/`.xlsx`/`.odt`/`.ods`/`.odp` files in it)
+case-insensitively:
 
 ```
 $ ogrep -i budget .
@@ -37,8 +39,9 @@ text, `Paragraph N` for docx, `Slide N (Shape "...")` for pptx,
 json/yaml, an XPath like `/root/items/item[3]/name` for xml). The
 OpenDocument formats mirror their MS Office counterparts: odt reports
 the nearest preceding heading (same idea as docx's `Paragraph N`, just
-navigable), and ods reports `Sheet1:B45` (same cell addressing as
-xlsx). When stdout is a real terminal, the location is also wrapped in an OSC 8
+navigable), ods reports `Sheet1:B45` (same cell addressing as xlsx),
+and odp reports `Slide N`/`Slide N (Notes)` (same as pptx). When
+stdout is a real terminal, the location is also wrapped in an OSC 8
 hyperlink so an editor can jump straight to the match; piped or
 redirected output prints the plain text with no hyperlink. Add
 `-c`/`--count` to print just a match count per file instead:
@@ -85,6 +88,16 @@ individual cell it actually appears in. The JSON/`Fields()` output does
 include a `repeat` count alongside the one reported location, so a
 caller that needs to know how many times a value actually occurs can
 at least learn that, even though only one location is emitted.
+
+And an odp match reports its slide number, plus `(Notes)` when the
+match is in that slide's speaker notes rather than a shape on the
+slide itself:
+
+```
+$ ogrep --type odp agenda deck.odp
+deck.odp:Slide 1 Meeting Agenda
+deck.odp:Slide 4 (Notes) remember to mention the agenda change
+```
 
 JSON and YAML files are flattened into `<path> = <value>` lines using
 jq/yq path syntax, so a matched line's path can be pasted straight into
