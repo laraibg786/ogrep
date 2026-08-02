@@ -203,6 +203,52 @@ func TestLargeXMLIsClaimedByXmldocNotText(t *testing.T) {
 	}
 }
 
+// TestValidJSONCClaimedByDedicatedPlugin mirrors
+// TestValidJSONClaimedByDedicatedPlugin for JSONC (JSON With Commas and
+// Comments): jsoncdoc fully parses in Sniff (unlike jsondoc/xmldoc's
+// cheap first-token trial decode), so it can confidently claim content
+// with comments/trailing commas that would fail jsondoc's own Sniff.
+func TestValidJSONCClaimedByDedicatedPlugin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.jsonc")
+	if got := claim(t, path, []byte("// comment\n{\"a\": 1,}\n")); got != "jsonc" {
+		t.Errorf("doc.jsonc: claimed by %q, want %q", got, "jsonc")
+	}
+}
+
+// TestMalformedJSONCFallsBackToText mirrors
+// TestMalformedJSONFallsBackToText for JSONC: content that doesn't look
+// JSON-ish at all (not even a valid opening token) must fall back to
+// text. See TestJSONCFallsBackToJSONNotTextWhenContentLooksLikeJSON
+// below for the more surprising case where malformed-but-JSON-shaped
+// content lands on jsondoc instead.
+func TestMalformedJSONCFallsBackToText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "broken.jsonc")
+	if got := claim(t, path, []byte("totally not json despite the extension")); got != "text" {
+		t.Errorf("broken.jsonc: claimed by %q, want fallback to %q", got, "text")
+	}
+}
+
+// TestJSONCFallsBackToJSONNotTextWhenContentLooksLikeJSON documents a
+// real, non-obvious dispatch nuance: when jsoncdoc's full-parse Sniff
+// correctly declines malformed JSONC, the registry's fallback pool
+// doesn't necessarily land on text next -- it lands on whichever
+// "rest"-group extractor's own Sniff says yes first, in registration
+// order, and jsondoc has no extension awareness at all (its cheap Sniff
+// only trial-decodes the first token of whatever bytes it's given). So
+// malformed-but-json-shaped content with a .jsonc extension is claimed
+// by jsondoc, not text, once jsoncdoc declines -- text is only reached
+// when the content doesn't look JSON-ish at all (see
+// TestMalformedJSONCFallsBackToText above, which is deliberately not
+// JSON-shaped, to actually reach text).
+func TestJSONCFallsBackToJSONNotTextWhenContentLooksLikeJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "broken.jsonc")
+	// Starts with a valid "{" token (jsondoc's cheap Sniff accepts this)
+	// but is truncated, so jsoncdoc's full parse correctly declines it.
+	if got := claim(t, path, []byte(`{"a": `)); got != "json" {
+		t.Errorf("broken.jsonc (json-shaped but truncated): claimed by %q, want %q", got, "json")
+	}
+}
+
 // TestExistingOOXMLAndTextDispatchUnaffected is a regression test
 // confirming the new structured-data plugins don't interfere with
 // dispatch for the pre-existing formats: an unrelated, genuinely
