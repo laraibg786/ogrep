@@ -184,9 +184,12 @@ func TestExtractMultipleParagraphs(t *testing.T) {
 		if u.Text != wantTexts[i] {
 			t.Errorf("unit %d text = %q, want %q", i, u.Text, wantTexts[i])
 		}
-		wantHuman := "Paragraph " + string(rune('1'+i))
-		if u.Location.Human() != wantHuman {
-			t.Errorf("unit %d Human() = %q, want %q", i, u.Location.Human(), wantHuman)
+		// No heading precedes any of these paragraphs, so Human() must be
+		// "" (falling back to the bare path, not a paragraph number
+		// nobody can navigate to in Word -- see paragraphLocation.Human's
+		// doc comment).
+		if got := u.Location.Human(); got != "" {
+			t.Errorf("unit %d Human() = %q, want \"\" (no heading precedes it)", i, got)
 		}
 		loc, ok := u.Location.(paragraphLocation)
 		if !ok {
@@ -194,6 +197,53 @@ func TestExtractMultipleParagraphs(t *testing.T) {
 		}
 		if loc.Paragraph != i+1 {
 			t.Errorf("unit %d Paragraph = %d, want %d", i, loc.Paragraph, i+1)
+		}
+	}
+}
+
+// TestExtractHeadingTracking exercises paragraphLocation/cellLocation's
+// Human() reporting the nearest preceding Heading-styled paragraph
+// instead of a paragraph/cell number nobody can navigate to in Word --
+// see docx.go's "Heading tracking" doc comment for the rationale.
+func TestExtractHeadingTracking(t *testing.T) {
+	doc := `<?xml version="1.0" encoding="UTF-8"?><w:document ` + wNS + `><w:body>` +
+		`<w:p><w:r><w:t>before any heading</w:t></w:r></w:p>` +
+		`<w:p><w:pPr><w:pStyle w:val="Title"/></w:pPr><w:r><w:t>Document Title</w:t></w:r></w:p>` +
+		`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Introduction</w:t></w:r></w:p>` +
+		`<w:p><w:r><w:t>under introduction</w:t></w:r></w:p>` +
+		`<w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell under introduction</w:t></w:r></w:p></w:tc></w:tr></w:tbl>` +
+		`<w:p><w:pPr><w:pStyle w:val="Heading2"/></w:pPr><w:r><w:t>Details</w:t></w:r></w:p>` +
+		`<w:p><w:r><w:t>under details</w:t></w:r></w:p>` +
+		`</w:body></w:document>`
+	data := buildDocx(t, map[string]string{"word/document.xml": doc})
+
+	got := extractAll(t, data)
+
+	byText := make(map[string]string) // unit text -> Human()
+	for _, u := range got {
+		byText[u.Text] = u.Location.Human()
+	}
+
+	cases := []struct {
+		text string
+		want string
+	}{
+		{"before any heading", ""},                  // no heading precedes it
+		{"Document Title", ""},                      // "Title" style is not a heading
+		{"Introduction", "Introduction"},            // a heading reports itself
+		{"under introduction", "Introduction"},      // body paragraph under it
+		{"cell under introduction", "Introduction"}, // table cell under it too
+		{"Details", "Details"},                      // a later heading replaces it
+		{"under details", "Details"},
+	}
+	for _, tc := range cases {
+		got, ok := byText[tc.text]
+		if !ok {
+			t.Errorf("no unit found with text %q", tc.text)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("unit %q: Human() = %q, want %q", tc.text, got, tc.want)
 		}
 	}
 }
@@ -412,8 +462,8 @@ func TestExtractTextBoxNestedParagraphDoesNotCorruptEnclosingParagraph(t *testin
 	if got[0].Text != wantFirst {
 		t.Errorf("paragraph 1 text = %q, want %q (textbox-nested content must not corrupt the enclosing paragraph)", got[0].Text, wantFirst)
 	}
-	if got[0].Location.(paragraphLocation).Paragraph != 1 || got[0].Location.Human() != "Paragraph 1" {
-		t.Errorf("paragraph 1 location = %+v, want Paragraph 1", got[0].Location)
+	if got[0].Location.(paragraphLocation).Paragraph != 1 || got[0].Location.Human() != "" {
+		t.Errorf("paragraph 1 location = %+v, want Paragraph 1 with no heading", got[0].Location)
 	}
 	if strings.Contains(got[0].Text, "inside-textbox") {
 		t.Errorf("paragraph 1 text = %q must not contain the textbox's own nested content", got[0].Text)
@@ -423,8 +473,8 @@ func TestExtractTextBoxNestedParagraphDoesNotCorruptEnclosingParagraph(t *testin
 	if got[1].Text != wantSecond {
 		t.Errorf("paragraph 2 text = %q, want %q", got[1].Text, wantSecond)
 	}
-	if got[1].Location.(paragraphLocation).Paragraph != 2 || got[1].Location.Human() != "Paragraph 2" {
-		t.Errorf("paragraph 2 location = %+v, want Paragraph 2 (numbering must not shift due to the nested paragraph)", got[1].Location)
+	if got[1].Location.(paragraphLocation).Paragraph != 2 || got[1].Location.Human() != "" {
+		t.Errorf("paragraph 2 location = %+v, want Paragraph 2 with no heading (numbering must not shift due to the nested paragraph)", got[1].Location)
 	}
 }
 

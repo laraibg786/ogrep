@@ -52,6 +52,7 @@ func buildDocxFile(t *testing.T, path string) {
 
 	doc := `<?xml version="1.0" encoding="UTF-8"?><w:document ` + wNS + `><w:body>` +
 		`<w:p><w:r><w:t>nothing interesting here</w:t></w:r></w:p>` +
+		`<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Findings</w:t></w:r></w:p>` +
 		`<w:p><w:r><w:t>the needle is in this paragraph</w:t></w:r></w:p>` +
 		`<w:tbl><w:tr>` +
 		`<w:tc><w:p><w:r><w:t>irrelevant</w:t></w:r></w:p></w:tc>` +
@@ -94,9 +95,12 @@ func buildDocxFile(t *testing.T, path string) {
 // only the docx Extractor, writes a fixture .docx to a real temp file
 // on disk, and runs it through the real app.SearchOrchestrator (walker,
 // literal matcher, and an in-memory sink), asserting the matches that
-// come back carry the correct Location.Human strings. This is the
-// end-to-end proof that the plugin is wired correctly, not just correct
-// in isolation.
+// come back carry the correct Location.Human strings -- including that
+// the body paragraph and table-cell matches (both of which sit after a
+// "Findings" Heading 1 in the fixture) report that heading as their
+// Human(), not a paragraph/cell number. This is the end-to-end proof
+// that the plugin, including heading tracking, is wired correctly, not
+// just correct in isolation.
 func TestDocxThroughRealOrchestrator(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "report.docx")
@@ -131,7 +135,7 @@ func TestDocxThroughRealOrchestrator(t *testing.T) {
 	}
 	sort.Strings(humans)
 
-	want := []string{"Header 1", "Paragraph 2", "Table 1, Row 1, Cell 2"}
+	want := []string{"Findings", "Findings", "Header 1"}
 	if len(humans) != len(want) {
 		t.Fatalf("got Human labels %v, want %v", humans, want)
 	}

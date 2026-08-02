@@ -11,42 +11,56 @@ import (
 )
 
 // paragraphLocation implements domain.Location for a top-level body
-// paragraph.
+// paragraph. Paragraph is retained for Fields()/document-order purposes
+// only; Human deliberately does not render it -- see Human's own doc
+// comment.
 type paragraphLocation struct {
 	Paragraph int
+	// Heading is the nearest preceding Heading-styled paragraph's text
+	// (see headingStyleLevel), or "" if none has been seen yet.
+	Heading string
 }
 
-func (l paragraphLocation) Human() string { return fmt.Sprintf("Paragraph %d", l.Paragraph) }
+// Human renders the nearest preceding heading only, or "" if the
+// document has no heading before this point. A bare paragraph number
+// ("Paragraph 56") isn't something a reader can act on -- Word's own Go
+// To dialog can jump to a Heading, a Bookmark, a Page, but not to an
+// arbitrary paragraph index -- so rather than print a number nobody can
+// navigate to, this mirrors what Word's Navigation Pane itself shows:
+// the enclosing heading, or nothing if there isn't one.
+func (l paragraphLocation) Human() string { return l.Heading }
 
 func (l paragraphLocation) Fields(spans []domain.Span) map[string]any {
-	return map[string]any{"paragraph": l.Paragraph}
+	return map[string]any{"paragraph": l.Paragraph, "heading": l.Heading}
 }
 
 // HyperlinkURI opens the file with no location fragment: Word only
 // navigates a file:// fragment to a real bookmark already present in
-// the document, so a paragraph number can't jump there and is omitted
-// rather than looking clickable while silently doing nothing. spans is
-// unused for the same reason.
+// the document, and a heading title isn't reliably one (no guarantee
+// it's also marked as a bookmark), so it's omitted rather than looking
+// clickable while silently doing nothing. spans is unused for the same
+// reason.
 func (l paragraphLocation) HyperlinkURI(path string, spans []domain.Span) string {
 	return domain.FileURI(path, "")
 }
 
-// cellLocation implements domain.Location for a table cell.
+// cellLocation implements domain.Location for a table cell. Table/Row/Col
+// are retained for Fields() only; see paragraphLocation's Human for why
+// Human renders the nearest heading instead of an address nobody can
+// navigate to in Word.
 type cellLocation struct {
 	Table, Row, Col int
+	Heading         string
 }
 
-func (l cellLocation) Human() string {
-	return fmt.Sprintf("Table %d, Row %d, Cell %d", l.Table, l.Row, l.Col)
-}
+func (l cellLocation) Human() string { return l.Heading }
 
 func (l cellLocation) Fields(spans []domain.Span) map[string]any {
-	return map[string]any{"table": l.Table, "row": l.Row, "col": l.Col}
+	return map[string]any{"table": l.Table, "row": l.Row, "col": l.Col, "heading": l.Heading}
 }
 
 // HyperlinkURI opens the file with no location fragment; see
-// paragraphLocation.HyperlinkURI for why a table/row/cell address can't
-// be expressed as a navigable fragment in Word.
+// paragraphLocation.HyperlinkURI for why.
 func (l cellLocation) HyperlinkURI(path string, spans []domain.Span) string {
 	return domain.FileURI(path, "")
 }
@@ -143,6 +157,18 @@ func attrValue(t xml.StartElement, localName string) string {
 		}
 	}
 	return ""
+}
+
+// isHeadingStyle reports whether styleID (a w:pStyle's "val" attribute)
+// names one of Word's built-in Heading styles. Built-in style IDs are
+// always stored in this English form regardless of the UI's display
+// locale (only the human-visible style *name* is localized), so this is
+// a reliable check independent of what language Word was authored in.
+// "Title" is deliberately not treated as a heading: it's a single
+// per-document label, not a navigable section boundary the way Heading
+// 1-9 are.
+func isHeadingStyle(styleID string) bool {
+	return strings.HasPrefix(styleID, "Heading")
 }
 
 // isDrawingWrapper reports whether localName is an element that can wrap
@@ -302,18 +328,39 @@ func extractDocumentBody(f *zip.File, out send) error {
 	var cellStack []*cellState
 	aborted := false
 
+	// Heading tracking: currentHeading is the text of the nearest
+	// Heading-styled paragraph seen so far (see isHeadingStyle), used as
+	// every subsequent paragraphLocation/cellLocation's Human() until the
+	// next heading replaces it. isHeadingPara/headingAccum track whether
+	// the CURRENTLY open paragraph is itself a heading and accumulate its
+	// text as it streams in, so a heading paragraph that itself matches
+	// the search pattern reports itself (not the previous heading) --
+	// currentHeading is updated as each of its segments flushes, before
+	// that same segment's own Location is built.
+	var currentHeading string
+	var isHeadingPara bool
+	var headingAccum strings.Builder
+
 	// flushSegment emits one paragraph-or-cell segment as its own
 	// TextUnit, called both mid-paragraph (on a w:br/w:cr split) and
 	// once more at the paragraph's own closing tag for whatever text
 	// remains after the last such split.
 	flushSegment := func(text string) {
+		if isHeadingPara {
+			if headingAccum.Len() > 0 {
+				headingAccum.WriteByte(' ')
+			}
+			headingAccum.WriteString(text)
+			currentHeading = headingAccum.String()
+		}
+
 		if n := len(cellStack); n > 0 {
 			if strings.TrimSpace(text) == "" {
 				return
 			}
 			cell := cellStack[n-1]
 			unit := domain.TextUnit{
-				Location: cellLocation{Table: cell.table, Row: cell.row, Col: cell.col},
+				Location: cellLocation{Table: cell.table, Row: cell.row, Col: cell.col, Heading: currentHeading},
 				Text:     text,
 			}
 			if !out(unit) {
@@ -321,7 +368,7 @@ func extractDocumentBody(f *zip.File, out send) error {
 			}
 		} else {
 			unit := domain.TextUnit{
-				Location: paragraphLocation{Paragraph: paragraphNum},
+				Location: paragraphLocation{Paragraph: paragraphNum, Heading: currentHeading},
 				Text:     text,
 			}
 			if !out(unit) {
@@ -351,8 +398,14 @@ func extractDocumentBody(f *zip.File, out send) error {
 			switch t.Name.Local {
 			case "p":
 				rt.curPara = &strings.Builder{}
+				isHeadingPara = false
+				headingAccum.Reset()
 				if len(cellStack) == 0 {
 					paragraphNum++
+				}
+			case "pStyle":
+				if rt.curPara != nil && isHeadingStyle(attrValue(t, "val")) {
+					isHeadingPara = true
 				}
 			case "tbl":
 				tableCounter++

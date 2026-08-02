@@ -7,12 +7,12 @@
 // namespace, referred to as "w:" below):
 //
 //   - word/document.xml: the main body (w:body). Body paragraphs are
-//     numbered sequentially (1-based) in document order and reported
-//     with a paragraphLocation whose Human is "Paragraph N". Paragraphs
-//     nested inside a table cell (w:tbl > w:tr > w:tc > w:p) do NOT bump
-//     this counter — they are addressed instead via Table/Row/Col and
-//     reported with a cellLocation whose Human is
-//     "Table T, Row R, Cell C". A cell with more than one paragraph
+//     numbered sequentially (1-based) in document order (kept in
+//     paragraphLocation.Paragraph for Fields()/--json) and, like table
+//     cells (w:tbl > w:tr > w:tc > w:p, addressed via Table/Row/Col in
+//     cellLocation.Fields()), report their Human() as the nearest
+//     preceding Heading-styled paragraph's text -- see "Heading
+//     tracking" below for why. A cell with more than one paragraph
 //     emits one unit PER non-blank paragraph, all sharing that same
 //     cellLocation, rather than concatenating them into a single unit —
 //     see "Line splitting" below for why.
@@ -40,6 +40,23 @@
 // as a tab-STOP definition (unrelated to actual inserted text), so
 // tracking "are we inside a run" is what keeps that case from being
 // misread as inserted text.
+//
+// Heading tracking: Word's own "Go To" navigation supports jumping to a
+// Heading, a Bookmark, or a Page -- never to an arbitrary paragraph
+// index or table cell address, since those aren't concepts a reader can
+// act on (a 100-page report's "Paragraph 56" means nothing without
+// manually counting through the document). So instead of printing a
+// number nobody can navigate to, paragraphLocation/cellLocation.Human()
+// report the nearest preceding Heading-styled paragraph's own text --
+// exactly what Word's Navigation Pane sidebar would show for that
+// position -- or "" if no heading precedes the match yet, rather than
+// falling back to a paragraph/cell number that's equally useless.
+// isHeadingStyle recognizes a w:pStyle whose "val" is "Heading1"
+// through "Heading9" (Word's built-in style IDs, stored in English
+// regardless of the UI's display locale); "Title" is deliberately not
+// treated as a heading, since it's a one-per-document label, not a
+// navigable section boundary. A heading paragraph that itself matches
+// the search pattern reports itself, not the previous heading.
 //
 // Line splitting: a paragraph containing a manual line break (w:br/w:cr)
 // is split into multiple TextUnits at that point, one per segment,
