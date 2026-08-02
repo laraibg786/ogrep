@@ -3,12 +3,13 @@
 A ripgrep-style command-line search tool that searches plain text
 files, MS Office documents (`.docx`, `.pptx`, `.xlsx`), OpenDocument
 files (`.odt`, `.ods`, `.odp`), and structured data files (`.json`,
-`.jsonc`, `.jsonl`/`.ndjson`, `.yaml`/`.yml`, `.xml`). Most formats
-stream through each document instead of loading it fully into memory;
-YAML and JSONC are the exceptions, each parsed as a size-bounded
-in-memory tree (capped at 64 MiB per file) since neither has a
-streaming parser that also tracks the path/line information this tool
-needs.
+`.jsonc`, `.jsonl`/`.ndjson`, `.yaml`/`.yml`, `.xml`, `.toml`). Most
+formats stream through each document instead of loading it fully into
+memory; YAML, JSONC, and TOML are the exceptions, each parsed as a
+size-bounded in-memory tree (capped at 64 MiB per file for YAML/JSONC,
+8 MiB for TOML -- real-world TOML files are config-file-sized, not
+tens of megabytes) since none of them has a streaming parser that also
+tracks the path/line information this tool needs.
 
 ```
 ogrep [flags] PATTERN [PATH...]
@@ -146,6 +147,39 @@ document-index selector:
 ```
 $ ogrep Grace events.jsonl
 events.jsonl:.user (line 2:17) .user = "Grace"
+```
+
+`.toml` files report the jq/yq-style path as the location for a value
+match, and a bare line number for a comment match — the underlying
+parser (go-toml/v2's `unstable` package) still tracks exact
+line/column for both, available in `--json` output (as `line`/`col`,
+alongside `tomlpath` for values) and in the OSC 8 hyperlink used for
+click-to-navigate, but the console-facing location stays a single
+short, identifying label rather than repeating that position inline.
+The value's own text is the real, verbatim line from the file, not a
+reconstruction, so a hex/octal/binary integer literal or a legacy
+escape sequence keeps its exact source spelling:
+
+```
+$ ogrep alpha config.toml
+config.toml:.servers[0].name name = "alpha"
+```
+
+The path is also available on its own in `--json` output (as
+`tomlpath`, alongside `line`/`col`), for scripting against a specific
+key:
+
+```
+$ ogrep --json alpha config.toml
+{"col":8,"format":"toml","line":7,"path":"config.toml","spans":[{"start":8,"end":13}],"text":"name = \"alpha\"","tomlpath":".servers[0].name","type":"match","uri":"file://config.toml:7:8"}
+```
+
+TOML comments are searchable too, each reported as its own match at its
+real line (marked `"comment":true` in `--json` output):
+
+```
+$ ogrep "comment mentioning" config.toml
+config.toml:14 # comment mentioning alpha for search
 ```
 
 By default, `.gitignore` and `.ogrepignore` files are respected the

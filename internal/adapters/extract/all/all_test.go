@@ -275,6 +275,37 @@ func TestMalformedJSONLFallsBackToText(t *testing.T) {
 	}
 }
 
+// TestValidTOMLClaimedByDedicatedPlugin mirrors
+// TestValidJSONClaimedByDedicatedPlugin for TOML.
+func TestValidTOMLClaimedByDedicatedPlugin(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "doc.toml")
+	if got := claim(t, path, []byte("a = 1\n")); got != "toml" {
+		t.Errorf("doc.toml: claimed by %q, want %q", got, "toml")
+	}
+}
+
+// TestMalformedTOMLFallsBackToText mirrors
+// TestMalformedJSONFallsBackToText for TOML: content that doesn't
+// parse as TOML at all must fall back to text.
+func TestMalformedTOMLFallsBackToText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "broken.toml")
+	if got := claim(t, path, []byte("totally not toml despite the extension = = =")); got != "text" {
+		t.Errorf("broken.toml: claimed by %q, want fallback to %q", got, "text")
+	}
+}
+
+// TestProseTOMLFallsBackToText is a regression test for tomldoc's
+// "at least one real key" structure gate (see tomldoc's Sniff doc
+// comment): a comment-only document parses "successfully" with zero
+// decoded keys, so it must still fall back to text rather than being
+// claimed by tomldoc.
+func TestProseTOMLFallsBackToText(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "prose.toml")
+	if got := claim(t, path, []byte("# just a comment, no real structure\n")); got != "text" {
+		t.Errorf("prose.toml: claimed by %q, want fallback to %q", got, "text")
+	}
+}
+
 // TestExistingOOXMLAndTextDispatchUnaffected is a regression test
 // confirming the new structured-data plugins don't interfere with
 // dispatch for the pre-existing formats: an unrelated, genuinely
