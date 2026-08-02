@@ -26,6 +26,25 @@ type ExtractorLookup interface {
 // parallel, dispatch each to its extractor, match its extracted text,
 // and write results to a single OutputSink without interleaving
 // different files' output.
+//
+// Concurrency model: each of Run's worker goroutines does the CPU-bound
+// extraction+matching for its files completely independently -- nothing
+// about that work is ever serialized across files. The only serialized
+// part is the actual write to Sink, and that's handled by a single
+// dedicated writer goroutine (spawned in Run) draining a FIFO queue of
+// per-file fileSessions, one at a time, fully draining one file's
+// matches (in the order they were found) before moving to the next
+// file in queue order. Because the writer is the sole caller of Sink's
+// methods, no mutex is needed to keep two files' output from
+// interleaving. This also means a slow-to-extract file's matches still
+// reach the sink as they're found -- the writer is draining its
+// session's matches channel concurrently with the rest of that file
+// being extracted -- without that file's unrelated CPU work ever
+// blocking any other file's writes the way a single global write lock
+// held across a whole file's processing would (profiling a
+// high-match-density corpus showed exactly that: wall-clock time
+// completely flat regardless of thread count under that earlier
+// design).
 type SearchOrchestrator struct {
 	Registry ExtractorLookup
 	Walker   ports.FileWalker
@@ -36,30 +55,30 @@ type SearchOrchestrator struct {
 	// files, panics recovered from a misbehaving extractor, etc). If
 	// nil, os.Stderr is used.
 	Stderr io.Writer
-
-	// writeMu serializes the whole per-file write-out (every WriteMatch
-	// call for one file, plus its WriteFileSummary) so that two files'
-	// results are never interleaved, even though many files are
-	// processed concurrently. The OutputSink implementations are also
-	// individually safe for concurrent use; this mutex additionally
-	// guarantees a whole file's batch of matches is written as one
-	// contiguous unit, matching the grouped-by-file output convention
-	// grep-family tools use even under parallelism.
-	//
-	// searchFile acquires this lazily, on its first actual write (see
-	// lockOnce there), and holds it continuously through the rest of
-	// that file's matches and its final summary line -- not just for a
-	// single quick flush at the end. That's what lets one file's matches
-	// reach the sink as they're found rather than only after the whole
-	// file has been fully read (valuable for a large, slow-to-extract
-	// file), at a real cost: once a file has started writing, every
-	// other file's own writes block until this one finishes, for
-	// whatever's left of its processing after that first match. Because
-	// the lock is only acquired once a file actually has something to
-	// write, a file with no matches never blocks anyone, and files
-	// finishing before another's first match are unaffected.
-	writeMu sync.Mutex
 }
+
+// fileSession is one file's slot in the single writer goroutine's FIFO
+// queue (see Run): matches carries this file's Matches as they're
+// found, closed once the file's search ends (however it ends).
+// summaryCh carries the file's final match count for WriteFileSummary,
+// sent exactly once in the normal case -- or closed without a value if
+// the file's search aborted before producing one (e.g. a recovered
+// panic), telling the writer to skip that file's summary rather than
+// block forever waiting for a count that will never arrive.
+type fileSession struct {
+	path      string
+	matches   chan domain.Match
+	summaryCh chan int
+}
+
+// matchQueueBuffer bounds how many of one file's matches the writer
+// goroutine may lag behind by before that file's own searchFile call
+// starts blocking on a send. Large enough that a fast worker rarely
+// blocks waiting for the (usually much cheaper) write side to catch up;
+// small enough that a pathologically match-dense file can't grow an
+// unbounded in-memory backlog the way batching a whole file's matches
+// before writing any of them would.
+const matchQueueBuffer = 256
 
 // New builds a SearchOrchestrator from its four collaborators.
 func New(reg ExtractorLookup, walker ports.FileWalker, matchers ports.MatcherFactory, sink ports.OutputSink) *SearchOrchestrator {
@@ -109,6 +128,53 @@ func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []st
 
 	paths, walkErrc := o.Walker.Walk(runCtx, roots, opts)
 
+	// sessions is the writer goroutine's FIFO queue of pending file
+	// write-outs, one entry per file that actually has something to
+	// write (see fileSession, and searchFile's ensureSession). Buffered
+	// by threads so a worker enqueueing a new session doesn't have to
+	// wait for the writer to finish the previous one unless more than
+	// `threads` files are simultaneously ready to write at once.
+	sessions := make(chan *fileSession, threads)
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for session := range sessions {
+			for m := range session.matches {
+				// A panic here (e.g. from a misbehaving Sink) must not
+				// take down the writer goroutine: unlike searchFile's own
+				// per-file recover(), this goroutine is shared by every
+				// file, so an unrecovered panic would stop draining every
+				// other file's session too, deadlocking their producers.
+				// Scoped per-write (not once around the whole session) so
+				// draining continues -- and this file's remaining matches
+				// and its summary are still consumed -- after a single
+				// bad write.
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							fmt.Fprintf(stderr, "ogrep: warning: panic writing match for %s: %v\n", session.path, r)
+						}
+					}()
+					if werr := o.Sink.WriteMatch(m); werr != nil {
+						fmt.Fprintf(stderr, "ogrep: warning: writing match for %s: %v\n", session.path, werr)
+					}
+				}()
+			}
+			if count, ok := <-session.summaryCh; ok {
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							fmt.Fprintf(stderr, "ogrep: warning: panic writing summary for %s: %v\n", session.path, r)
+						}
+					}()
+					if werr := o.Sink.WriteFileSummary(session.path, count); werr != nil {
+						fmt.Fprintf(stderr, "ogrep: warning: writing summary for %s: %v\n", session.path, werr)
+					}
+				}()
+			}
+		}
+	}()
+
 	var wg sync.WaitGroup
 	var firstWalkErr error
 	var walkErrOnce sync.Once
@@ -119,12 +185,14 @@ func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []st
 			defer wg.Done()
 			for path := range paths {
 				atomic.AddInt64(&stats.FilesWalked, 1)
-				o.searchFile(runCtx, path, matcher, opts, &stats, stderr)
+				o.searchFile(runCtx, path, matcher, opts, &stats, stderr, sessions)
 			}
 		}()
 	}
 
 	wg.Wait()
+	close(sessions)
+	<-writerDone
 
 	if err, ok := <-walkErrc; ok && err != nil {
 		walkErrOnce.Do(func() { firstWalkErr = err })
@@ -138,9 +206,9 @@ func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []st
 }
 
 // searchFile handles exactly one file: extractor lookup, streaming
-// extraction, matching, and writing this file's results to o.Sink as
-// they're found (see writeMu's doc comment for why writes, not just
-// extraction, are streamed).
+// extraction, matching, and enqueuing this file's results for the
+// writer goroutine as they're found (see SearchOrchestrator's doc
+// comment for the overall concurrency model).
 //
 // The deferred recover() below only catches panics that happen
 // synchronously in THIS goroutine — e.g. inside Registry.For/Sniff, or
@@ -154,7 +222,7 @@ func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []st
 // ports.DocumentExtractor: implementations must recover inside their
 // Extract goroutine and report the panic as an error on the error
 // channel instead of letting it crash the process.
-func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matcher ports.Matcher, opts domain.SearchOptions, stats *Stats, stderr io.Writer) {
+func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matcher ports.Matcher, opts domain.SearchOptions, stats *Stats, stderr io.Writer, sessions chan<- *fileSession) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Fprintf(stderr, "ogrep: warning: panic while searching %s: %v\n", path, r)
@@ -203,35 +271,54 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 	// to -c/--count -- so context lines (-A/-B/-C) never inflate it.
 	realMatchCount := 0
 
-	// writeLocked is true once this file has acquired o.writeMu; it's
-	// acquired lazily, right before the first actual write this file
-	// makes (see writeMu's doc comment), and released via the deferred
-	// unlockIfLocked below once searchFile returns -- whether that's
-	// after a normal finish or an early return, e.g. a zero-match file
-	// skipping straight past every write.
-	writeLocked := false
-	lockOnce := func() {
-		if !writeLocked {
-			o.writeMu.Lock()
-			writeLocked = true
+	// session is this file's slot in the writer's FIFO queue, created
+	// lazily by ensureSession on the first actual write this file makes
+	// (mirroring the old lockOnce pattern): a file with no matches never
+	// enqueues anything, and -l/-c files only enqueue once, for their
+	// summary, never for individual matches.
+	var session *fileSession
+	summarySent := false
+	ensureSession := func() *fileSession {
+		if session == nil {
+			session = &fileSession{
+				path:      path,
+				matches:   make(chan domain.Match, matchQueueBuffer),
+				summaryCh: make(chan int, 1),
+			}
+			select {
+			case sessions <- session:
+			case <-ctx.Done():
+				// Run is winding down; the writer may never see this
+				// session. Sends below select on ctx.Done() too, so
+				// searchFile still won't block forever.
+			}
 		}
+		return session
 	}
 	defer func() {
-		if writeLocked {
-			o.writeMu.Unlock()
+		if session != nil {
+			close(session.matches)
+			if !summarySent {
+				// searchFile is returning without ever reaching the
+				// normal summary send below (e.g. a recovered panic
+				// mid-loop). Close, don't leave the writer blocked
+				// forever waiting on a count that's never coming.
+				close(session.summaryCh)
+			}
 		}
 	}()
 
-	// write sends m to o.Sink.WriteMatch, unless -l/-c was requested (in
-	// which case only the per-file count that write's callers already
-	// track matters, not the matches themselves).
+	// write sends m to this file's session, unless -l/-c was requested
+	// (in which case only the per-file count that write's callers
+	// already track matters, not the matches themselves).
 	write := func(m domain.Match) {
 		if opts.FilesWithMatches || opts.CountOnly {
 			return
 		}
-		lockOnce()
-		if werr := o.Sink.WriteMatch(m); werr != nil {
-			fmt.Fprintf(stderr, "ogrep: warning: writing match for %s: %v\n", path, werr)
+		s := ensureSession()
+		select {
+		case s.matches <- m:
+		case <-ctx.Done():
 		}
 	}
 
@@ -343,10 +430,9 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 	atomic.AddInt64(&stats.FilesMatched, 1)
 	atomic.AddInt64(&stats.TotalMatches, int64(realMatchCount))
 
-	lockOnce()
-	if werr := o.Sink.WriteFileSummary(path, realMatchCount); werr != nil {
-		fmt.Fprintf(stderr, "ogrep: warning: writing summary for %s: %v\n", path, werr)
-	}
+	s := ensureSession()
+	s.summaryCh <- realMatchCount
+	summarySent = true
 }
 
 // typeAllowed reports whether name (an extractor's Name(), e.g. "docx")

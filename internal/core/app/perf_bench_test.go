@@ -22,8 +22,8 @@ package app_test
 // of per-unit work matters more than exercising a real format parser.)
 //
 // The benchmark's actual question: does wall-clock meaningfully improve
-// as Threads increases, or does something (e.g. the writeMu-guarded
-// write-out) serialize work unexpectedly? To make that a fair test, the
+// as Threads increases, or does something (e.g. the writer goroutine's
+// FIFO queue) serialize work unexpectedly? To make that a fair test, the
 // fake extractor does a deliberately-sized amount of artificial CPU work
 // per unit (busyWork), so file-processing time dominates over the
 // output-writing critical section -- otherwise, with near-instant fake
@@ -152,8 +152,9 @@ func buildOrchestratorCorpus(tb testing.TB, nFiles int) string {
 // reporting each configuration's ns/op so the scaling behavior can be
 // read directly off the benchmark output: if per-op time doesn't drop
 // substantially from threads=1 to threads=runtime.NumCPU(), that's a
-// signal something (e.g. writeMu, or per-file setup cost) is serializing
-// work that should otherwise parallelize across the worker pool.
+// signal something (e.g. per-file setup cost, or the writer goroutine's
+// FIFO queue) is serializing work that should otherwise parallelize
+// across the worker pool.
 func BenchmarkOrchestratorThreadScaling(b *testing.B) {
 	const nFiles = 200
 	const unitsPerFile = 10
