@@ -841,7 +841,7 @@ func TestExtractLocationHasRealPosition(t *testing.T) {
 	if got, want := loc.Human(), ".a"; got != want {
 		t.Errorf("Human() = %q, want %q (bare jq path, no line/column decoration)", got, want)
 	}
-	if got, want := loc.HyperlinkURI("file.toml", nil), "file://file.toml:1:5"; got != want {
+	if got, want := loc.HyperlinkURI("/tmp/file.toml", nil), "file:///tmp/file.toml:1:5"; got != want {
 		t.Errorf("HyperlinkURI() = %q, want %q", got, want)
 	}
 	fields := loc.Fields(nil)

@@ -6,7 +6,10 @@
 // sinks — keep them free of any adapter-specific logic.
 package domain
 
-import "net/url"
+import (
+	"net/url"
+	"path/filepath"
+)
 
 // FileURI builds a file:// URI for path, with fragment (if non-empty)
 // appended as the URI fragment. Both are percent-encoded: POSIX
@@ -15,7 +18,19 @@ import "net/url"
 // URI, so this must never be built by plain string concatenation.
 // Extractors call this from HyperlinkURI rather than each hand-rolling
 // their own escaping.
+//
+// path is resolved to an absolute path first: callers (the walker, via
+// Match.Path) pass whatever the user typed on the command line, which
+// is relative whenever the search root itself was relative (the
+// default root is "."), and a file:// URI with a relative Path is not
+// well-formed -- a terminal or browser has no reliable base to resolve
+// it against, so the hyperlink either does nothing or opens the wrong
+// file. If Abs fails (only possible if os.Getwd fails), path is used
+// as given rather than losing the link entirely.
 func FileURI(path, fragment string) string {
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
 	u := &url.URL{Scheme: "file", Path: path}
 	if fragment != "" {
 		u.Fragment = fragment

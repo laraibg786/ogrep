@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
 
 func TestFileURIEscapesPathAndFragment(t *testing.T) {
 	cases := []struct {
@@ -23,5 +26,25 @@ func TestFileURIEscapesPathAndFragment(t *testing.T) {
 				t.Errorf("FileURI(%q, %q) = %q, want %q", tc.path, tc.fragment, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestFileURIResolvesRelativePathToAbsolute is a regression test: every
+// format's HyperlinkURI is handed whatever path the walker discovered a
+// match under, which is relative whenever the search root itself was
+// relative (the CLI's default root is "."). A file:// URI with a
+// relative Path isn't well-formed -- there's no base for a terminal or
+// browser to resolve it against -- so FileURI must always resolve to an
+// absolute path before building the URI, regardless of what the caller
+// passed in.
+func TestFileURIResolvesRelativePathToAbsolute(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	got := FileURI("sub/report.docx", "")
+
+	want := "file://" + filepath.Join(dir, "sub", "report.docx")
+	if got != want {
+		t.Errorf("FileURI(%q, %q) = %q, want %q (relative path was not resolved to absolute)", "sub/report.docx", "", got, want)
 	}
 }
