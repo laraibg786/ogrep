@@ -65,6 +65,18 @@ type DocumentExtractor interface {
 	Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-chan domain.TextUnit, <-chan error)
 }
 
+// StreamExtractor is implemented by an extractor that can process a
+// plain io.Reader directly -- no io.ReaderAt, no known size. Only a
+// genuinely single-pass, forward-only format can implement this; the
+// zip-based Office formats can't (archive/zip's central directory lives
+// at the end of the stream), which is why ogrep treats piped stdin as
+// plain text only, exactly like grep/rg do. Same panic/channel-closing
+// contract as DocumentExtractor.Extract.
+type StreamExtractor interface {
+	Name() string
+	ExtractReader(ctx context.Context, r io.Reader) (<-chan domain.TextUnit, <-chan error)
+}
+
 // Matcher finds all matches of a compiled pattern within a string,
 // returning their byte-offset spans.
 type Matcher interface {

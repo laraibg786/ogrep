@@ -126,6 +126,28 @@ func TestWalkerExplicitFileArgumentAlwaysSearched(t *testing.T) {
 	}
 }
 
+// TestWalkerEmptyRootsYieldsNothing regression-locks a behavior the
+// orchestrator's stdin support now depends on: when every root was the
+// "-" stdin pseudo-path, the orchestrator strips it out before calling
+// Walk, potentially leaving an empty roots slice. Walk must degrade
+// cleanly -- both channels close with nothing sent and no error --
+// rather than hang or panic.
+func TestWalkerEmptyRootsYieldsNothing(t *testing.T) {
+	w := New()
+	paths, errc := w.Walk(context.Background(), []string{}, domain.SearchOptions{})
+
+	var got []string
+	for p := range paths {
+		got = append(got, p)
+	}
+	if len(got) != 0 {
+		t.Errorf("got %d paths from empty roots, want 0", len(got))
+	}
+	if err, ok := <-errc; ok {
+		t.Errorf("walk emitted error value %v, want a closed channel with no values", err)
+	}
+}
+
 func TestWalkerNestedGitignore(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "keep.txt"), "keep")

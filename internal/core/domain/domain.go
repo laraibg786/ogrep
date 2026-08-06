@@ -11,6 +11,14 @@ import (
 	"path/filepath"
 )
 
+// StdinPath is the grep/rg-style pseudo-path meaning "read standard
+// input" -- either given explicitly as a PATH argument, or substituted
+// implicitly when no PATH is given and stdin isn't a terminal. It's
+// never a real filesystem path: the walker strips it out before doing
+// any real path handling, and output sinks use it to recognize there's
+// no backing file to build a hyperlink to.
+const StdinPath = "-"
+
 // FileURI builds a file:// URI for path, with fragment (if non-empty)
 // appended as the URI fragment. Both are percent-encoded: POSIX
 // filenames and sheet/shape names may legally contain spaces, '#',

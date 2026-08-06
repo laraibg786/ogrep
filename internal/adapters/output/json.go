@@ -49,11 +49,19 @@ func (j *JSON) WriteMatch(m domain.Match) error {
 		spans[i] = jsonSpan{Start: s.Start, End: s.End}
 	}
 
+	// m.Path == domain.StdinPath has no real backing file to link to
+	// (see domain.StdinPath's doc comment), so uri stays "" rather than
+	// building one that can never resolve.
+	uri := ""
+	if m.Path != domain.StdinPath {
+		uri = m.Location.HyperlinkURI(m.Path, m.Spans)
+	}
+
 	rec := map[string]any{
 		"type":   "match",
 		"path":   m.Path,
 		"format": m.Format,
-		"uri":    m.Location.HyperlinkURI(m.Path, m.Spans),
+		"uri":    uri,
 		"text":   m.Text,
 		"spans":  spans,
 	}

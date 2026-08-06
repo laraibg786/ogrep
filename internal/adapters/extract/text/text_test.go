@@ -3,6 +3,7 @@ package text
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/laraibg786/ogrep/internal/core/domain"
@@ -122,6 +123,34 @@ func TestExtractStreamsLines(t *testing.T) {
 		}
 		if loc.Line != i+1 {
 			t.Errorf("unit %d line = %d, want %d", i, loc.Line, i+1)
+		}
+	}
+}
+
+// TestExtractReaderStreamsLines regression-locks ExtractReader against a
+// plain io.Reader with no io.ReaderAt/size available at all -- the
+// shape piped stdin naturally has -- confirming Extract's file-based
+// path (io.NewSectionReader wrapped around Extract's ra/size, then fed
+// into this same scan) isn't the only way in.
+func TestExtractReaderStreamsLines(t *testing.T) {
+	r := strings.NewReader("first\nsecond\nthird")
+	units, errc := (Extractor{}).ExtractReader(context.Background(), r)
+
+	var got []domain.TextUnit
+	for u := range units {
+		got = append(got, u)
+	}
+	if err := <-errc; err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	wantTexts := []string{"first", "second", "third"}
+	if len(got) != len(wantTexts) {
+		t.Fatalf("got %d units, want %d", len(got), len(wantTexts))
+	}
+	for i, u := range got {
+		if u.Text != wantTexts[i] {
+			t.Errorf("unit %d text = %q, want %q", i, u.Text, wantTexts[i])
 		}
 	}
 }

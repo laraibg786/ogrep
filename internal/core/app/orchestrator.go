@@ -51,6 +51,17 @@ type SearchOrchestrator struct {
 	Matchers ports.MatcherFactory
 	Sink     ports.OutputSink
 
+	// StdinExtractor, if set, is used to search piped stdin (the
+	// domain.StdinPath "-" pseudo-root, matching grep/rg convention)
+	// directly off an io.Reader -- no temp file, no io.ReaderAt/size,
+	// genuine streaming. If nil, "-" is silently skipped, the same way
+	// an unrecognized file format is.
+	StdinExtractor ports.StreamExtractor
+
+	// Stdin is read from when "-" is requested. If nil, os.Stdin is
+	// used. Overridable so tests don't need a real stdin.
+	Stdin io.Reader
+
 	// Stderr receives warnings about per-file failures (unreadable
 	// files, panics recovered from a misbehaving extractor, etc). If
 	// nil, os.Stderr is used.
@@ -94,8 +105,11 @@ type Stats struct {
 }
 
 // Run walks roots, searches every recognized file for pattern under
-// opts, and writes matches to o.Sink. It returns aggregate Stats plus
-// the first fatal error encountered (a walker error, or a Compile
+// opts, and writes matches to o.Sink. A literal domain.StdinPath ("-")
+// entry in roots is handled separately from the rest (see
+// splitStdinRoot): it's searched via o.StdinExtractor against o.Stdin
+// directly, never through the walker/registry. It returns aggregate
+// Stats plus the first fatal error encountered (a walker error, or a Compile
 // error); per-file problems are logged as warnings to o.Stderr and do
 // not fail the whole run.
 func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []string, opts domain.SearchOptions) (Stats, error) {
@@ -126,7 +140,14 @@ func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []st
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	paths, walkErrc := o.Walker.Walk(runCtx, roots, opts)
+	// "-" is grep/rg's convention for reading standard input in place of
+	// a real path. The walker only ever deals in real filesystem paths
+	// (and must stay that way), so it's stripped out of roots here and
+	// searched separately below, as one more producer into the same
+	// sessions queue every file-search worker already uses.
+	walkRoots, stdinRequested := splitStdinRoot(roots)
+
+	paths, walkErrc := o.Walker.Walk(runCtx, walkRoots, opts)
 
 	// sessions is the writer goroutine's FIFO queue of pending file
 	// write-outs, one entry per file that actually has something to
@@ -190,6 +211,19 @@ func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []st
 		}()
 	}
 
+	if stdinRequested {
+		stdin := o.Stdin
+		if stdin == nil {
+			stdin = os.Stdin
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			atomic.AddInt64(&stats.FilesWalked, 1)
+			o.searchStdin(runCtx, stdin, matcher, opts, &stats, stderr, sessions)
+		}()
+	}
+
 	wg.Wait()
 	close(sessions)
 	<-writerDone
@@ -206,22 +240,10 @@ func (o *SearchOrchestrator) Run(ctx context.Context, pattern string, roots []st
 }
 
 // searchFile handles exactly one file: extractor lookup, streaming
-// extraction, matching, and enqueuing this file's results for the
-// writer goroutine as they're found (see SearchOrchestrator's doc
-// comment for the overall concurrency model).
-//
-// The deferred recover() below only catches panics that happen
-// synchronously in THIS goroutine — e.g. inside Registry.For/Sniff, or
-// inside Matcher.FindAll while we range over units. It does NOT, and
-// cannot, catch a panic raised inside an extractor's own Extract
-// goroutine (see internal/adapters/extract/text/text.go), since Go's
-// recover() only unwinds the goroutine it's deferred in. That case —
-// the one most likely to be triggered by malformed XML/zip content in
-// the docx/pptx/xlsx plugins — is the extractor's own responsibility to
-// guard against, per the contract documented on
-// ports.DocumentExtractor: implementations must recover inside their
-// Extract goroutine and report the panic as an error on the error
-// channel instead of letting it crash the process.
+// extraction, then delegating to runOnUnits for matching and writing
+// results (see SearchOrchestrator's doc comment for the overall
+// concurrency model, and runOnUnits's doc comment for what the deferred
+// recover() below can and can't catch).
 func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matcher ports.Matcher, opts domain.SearchOptions, stats *Stats, stderr io.Writer, sessions chan<- *fileSession) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -254,7 +276,6 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 		return
 	}
 	atomic.AddInt64(&stats.FilesSearched, 1)
-	format := extractor.Name()
 
 	// A per-file context lets us unblock (and let the extractor's
 	// goroutine exit and close its channels) if we stop consuming units
@@ -266,6 +287,78 @@ func (o *SearchOrchestrator) searchFile(ctx context.Context, path string, matche
 
 	units, extractErrc := extractor.Extract(fileCtx, f, size)
 
+	o.runOnUnits(ctx, fileCancel, path, extractor.Name(), units, extractErrc, matcher, opts, stats, stderr, sessions)
+}
+
+// searchStdin is searchFile's stdin-shaped sibling: same matching,
+// context-line, and session-write behavior (via runOnUnits), fed from
+// o.StdinExtractor's direct io.Reader stream instead of a
+// Registry-resolved, file-backed extractor. Every match it produces
+// reports domain.StdinPath ("-") as its path, matching grep/rg's own
+// convention for a piped input with no real backing file.
+//
+// opts.IncludeGlobs/ExcludeGlobs/NoIgnore never apply here (there's no
+// path for a glob to match against, or an ignore file to consult) --
+// only opts.Types is checked below, same as rg's own stdin handling.
+//
+// Because sessions is drained strictly FIFO (see fileSession's doc
+// comment), an indefinitely-long, slow-trickling stdin (e.g. `tail -f
+// |ogrep pat - somedir`) enqueued ahead of a real root's files would
+// starve them: their own sessions queue up behind stdin's still-open
+// one and never get drained. A finite stdin (the overwhelmingly common
+// case -- piping a command's output, or "-" alone) is unaffected.
+func (o *SearchOrchestrator) searchStdin(ctx context.Context, r io.Reader, matcher ports.Matcher, opts domain.SearchOptions, stats *Stats, stderr io.Writer, sessions chan<- *fileSession) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			fmt.Fprintf(stderr, "ogrep: warning: panic while searching %s: %v\n", domain.StdinPath, rec)
+		}
+	}()
+
+	if o.StdinExtractor == nil {
+		return
+	}
+	if len(opts.Types) > 0 && !typeAllowed(opts.Types, o.StdinExtractor.Name()) {
+		return
+	}
+	atomic.AddInt64(&stats.FilesSearched, 1)
+
+	fileCtx, fileCancel := context.WithCancel(ctx)
+	defer fileCancel()
+
+	units, extractErrc := o.StdinExtractor.ExtractReader(fileCtx, r)
+
+	o.runOnUnits(ctx, fileCancel, domain.StdinPath, o.StdinExtractor.Name(), units, extractErrc, matcher, opts, stats, stderr, sessions)
+}
+
+// runOnUnits is the shared tail of searchFile and searchStdin: matching,
+// -A/-B/-C context-line bookkeeping, -m/--max-count, -v/--invert-match,
+// and enqueuing path's results for the writer goroutine as
+// they're found (see SearchOrchestrator's doc comment for the overall
+// concurrency model). It has no notion of how units/extractErrc were
+// produced -- a Registry-resolved file extractor and a stdin
+// StreamExtractor look identical from here.
+//
+// fileCancel is the cancel func for the context units/extractErrc were
+// produced under; it's called explicitly below (not just deferred by
+// the caller) to unblock a still-producing extractor goroutine as soon
+// as this function stops consuming units early (MaxCount/context cap
+// reached, or ctx cancelled), before the blocking receive on
+// extractErrc that follows.
+//
+// The deferred recover() in searchFile/searchStdin only catches panics
+// that happen synchronously in THIS goroutine — e.g. inside
+// Registry.For/Sniff, or inside Matcher.FindAll while we range over
+// units. It does NOT, and cannot, catch a panic raised inside an
+// extractor's own Extract/ExtractReader goroutine (see
+// internal/adapters/extract/text/text.go), since Go's recover() only
+// unwinds the goroutine it's deferred in. That case — the one most
+// likely to be triggered by malformed XML/zip content in the
+// docx/pptx/xlsx plugins — is the extractor's own responsibility to
+// guard against, per the contract documented on ports.DocumentExtractor:
+// implementations must recover inside their Extract goroutine and
+// report the panic as an error on the error channel instead of letting
+// it crash the process.
+func (o *SearchOrchestrator) runOnUnits(ctx context.Context, fileCancel context.CancelFunc, path, format string, units <-chan domain.TextUnit, extractErrc <-chan error, matcher ports.Matcher, opts domain.SearchOptions, stats *Stats, stderr io.Writer, sessions chan<- *fileSession) {
 	// realMatchCount tracks only genuine matches -- used for
 	// Stats.TotalMatches, the -m/--max-count cap, and the count reported
 	// to -c/--count -- so context lines (-A/-B/-C) never inflate it.
@@ -444,6 +537,25 @@ func typeAllowed(types []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// splitStdinRoot pulls every literal domain.StdinPath ("-") entry out
+// of roots -- the walker only ever deals in real filesystem paths and
+// must stay that way -- returning the rest as walkRoots and whether any
+// were found at all. Repeated "-" entries collapse to a single bool:
+// stdin is read once regardless of how many times "-" was given, since
+// (unlike a real path) re-reading os.Stdin a second time wouldn't
+// reproduce the same bytes.
+func splitStdinRoot(roots []string) (walkRoots []string, stdinRequested bool) {
+	walkRoots = make([]string, 0, len(roots))
+	for _, r := range roots {
+		if r == domain.StdinPath {
+			stdinRequested = true
+			continue
+		}
+		walkRoots = append(walkRoots, r)
+	}
+	return walkRoots, stdinRequested
 }
 
 // ctxUnit pairs a TextUnit with its sequential position within the

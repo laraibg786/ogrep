@@ -14,6 +14,7 @@ import (
 	_ "go.uber.org/automaxprocs" // sets GOMAXPROCS from the cgroup CPU quota when running in a container/pod, so runtime.NumCPU()-based defaults (walker/orchestrator thread counts) don't oversubscribe; a documented no-op outside a container.
 
 	_ "github.com/laraibg786/ogrep/internal/adapters/extract/all"
+	"github.com/laraibg786/ogrep/internal/adapters/extract/text"
 	"github.com/laraibg786/ogrep/internal/adapters/match"
 	"github.com/laraibg786/ogrep/internal/adapters/output"
 	"github.com/laraibg786/ogrep/internal/adapters/walk"
@@ -44,9 +45,14 @@ Usage:
 
   ogrep [flags] PATTERN [PATH...]
 
-If no PATH is given, the current directory is searched. PATTERN is a
-regular expression by default; use -F/--fixed-strings for a literal
-search.
+If no PATH is given, the current directory is searched -- unless stdin
+has real piped data (e.g. "cat file | ogrep pattern"), in which case
+stdin itself is searched instead, matching ripgrep. A literal "-" also
+always means stdin, wherever it appears in PATH. Stdin is always
+searched as plain text, regardless of its actual content -- ogrep never
+tries to sniff or parse a document format (docx/pptx/xlsx/etc.) from a
+pipe. PATTERN is a regular expression by default; use -F/--fixed-strings
+for a literal search.
 
 Context lines (-A/-B/-C) and format filtering (--type) work like
 ripgrep's: -C N shows N text units of context on both sides of a match
@@ -184,12 +190,49 @@ func newRootCmd() *cobra.Command {
 	return rootCmd
 }
 
+// resolveRoots applies ogrep's rg-like defaulting: an explicit path
+// list is used as given (including a literal "-" for stdin, handled by
+// the orchestrator wherever it appears). With no paths at all, ogrep
+// searches "." unless stdin actually looks like real piped data
+// (stdinHasPipedData), in which case it reads stdin itself -- via the
+// same "-" convention -- e.g. `cat file | ogrep pattern`.
+func resolveRoots(pathArgs []string, stdinHasPipedData bool) []string {
+	if len(pathArgs) > 0 {
+		return pathArgs
+	}
+	if stdinHasPipedData {
+		return []string{domain.StdinPath}
+	}
+	return []string{"."}
+}
+
+// stdinHasPipedData reports whether f looks like it actually carries
+// data worth reading -- a regular file, a FIFO (a real `cmd | ogrep`
+// pipe), or a socket -- as opposed to a character device or an
+// unreadable/closed descriptor.
+//
+// This deliberately is NOT "stdin is not a terminal": a tty and
+// /dev/null are both character devices, so term.IsTerminal(f) being
+// false does not mean there's anything to read -- cron jobs, CI
+// pipelines, and `docker run` (without -i) all give a process /dev/null
+// on stdin, none of them a real pipe. Treating that the same as a
+// genuine piped-in pattern search would silently replace "search the
+// current directory" (today's, and every prior release's, behavior)
+// with "search nothing" for every such invocation. Stat erroring (e.g.
+// a closed fd 0) is treated the same as "nothing to read", the same
+// fail-safe direction.
+func stdinHasPipedData(f *os.File) bool {
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	mode := info.Mode()
+	return mode.IsRegular() || mode&os.ModeNamedPipe != 0 || mode&os.ModeSocket != 0
+}
+
 func runSearch(cmd *cobra.Command, args []string, flags cliFlags, cfg xdg.Config) error {
 	pattern := args[0]
-	roots := args[1:]
-	if len(roots) == 0 {
-		roots = []string{"."}
-	}
+	roots := resolveRoots(args[1:], stdinHasPipedData(os.Stdin))
 
 	if flags.filesWithMatches && flags.countOnly {
 		return fmt.Errorf("-l/--files-with-matches and -c/--count are mutually exclusive")
@@ -258,6 +301,7 @@ func runSearch(cmd *cobra.Command, args []string, flags cliFlags, cfg xdg.Config
 	}
 
 	orch := app.New(registry.Default, walk.New(), match.NewFactory(), sink)
+	orch.StdinExtractor = text.Extractor{}
 
 	stats, err := orch.Run(context.Background(), pattern, roots, opts)
 	if err != nil {

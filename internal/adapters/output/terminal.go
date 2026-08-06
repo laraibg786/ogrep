@@ -124,8 +124,11 @@ func (t *Terminal) WriteMatch(m domain.Match) error {
 	// wrapped around the location. Gated on isTTY, not color: a forced
 	// `--color=always` doesn't make hyperlinks any safer to emit into a
 	// non-terminal, so it doesn't affect this decision either.
+	// m.Path == domain.StdinPath has no real backing file to link to
+	// (see domain.StdinPath's doc comment), so the hyperlink is skipped
+	// entirely rather than building one that can never resolve.
 	display := loc
-	if t.isTTY {
+	if t.isTTY && m.Path != domain.StdinPath {
 		if uri := m.Location.HyperlinkURI(m.Path, m.Spans); uri != "" {
 			display = hyperlink(uri, loc)
 		}

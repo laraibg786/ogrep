@@ -16,10 +16,16 @@ this tool needs.
 ogrep [flags] PATTERN [PATH...]
 ```
 
-If no `PATH` is given, the current directory is searched. `PATTERN` is
-a regular expression by default; use `-F`/`--fixed-strings` for a
-literal search. Run `ogrep --help` for the full flag reference
-(context lines, `--type` format filtering, JSON output, and more).
+If no `PATH` is given, the current directory is searched -- unless
+stdin has real piped data (e.g. `cat file | ogrep pattern`), in which
+case stdin itself is searched instead, matching ripgrep. A literal `-`
+also always means stdin, wherever it appears in `PATH`. Stdin is always
+searched as plain text, regardless of its actual content -- ogrep never
+tries to sniff or parse a document format (docx/pptx/xlsx/etc.) from a
+pipe. `PATTERN` is a regular expression by default; use
+`-F`/`--fixed-strings` for a literal search. Run `ogrep --help` for the
+full flag reference (context lines, `--type` format filtering, JSON
+output, and more).
 
 ## Usage examples
 

@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -254,6 +255,144 @@ func TestOrchestratorTypeFilter(t *testing.T) {
 	if stats.TotalMatches != 2 {
 		t.Errorf("TotalMatches = %d, want 2", stats.TotalMatches)
 	}
+}
+
+// TestOrchestratorSearchesStdin confirms the domain.StdinPath ("-")
+// pseudo-root is read from orch.Stdin via orch.StdinExtractor, entirely
+// bypassing the walker/registry, and that resulting matches report "-"
+// as their path -- not a temp file or any other real path -- matching
+// grep/rg's own convention for piped input with no backing file.
+func TestOrchestratorSearchesStdin(t *testing.T) {
+	sink := newFakeSink()
+	orch := app.New(newTestRegistry(), walk.New(), match.NewFactory(), sink)
+	orch.Stdin = strings.NewReader("hello world\nnothing here\nhello again\n")
+	orch.StdinExtractor = text.Extractor{}
+
+	stats, err := orch.Run(context.Background(), "hello", []string{"-"}, domain.SearchOptions{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if stats.TotalMatches != 2 {
+		t.Errorf("TotalMatches = %d, want 2", stats.TotalMatches)
+	}
+	if len(sink.matches) != 2 {
+		t.Fatalf("got %d matches, want 2", len(sink.matches))
+	}
+	for _, m := range sink.matches {
+		if m.Path != domain.StdinPath {
+			t.Errorf("match Path = %q, want %q", m.Path, domain.StdinPath)
+		}
+		if m.Format != "text" {
+			t.Errorf("match Format = %q, want %q", m.Format, "text")
+		}
+	}
+}
+
+// TestOrchestratorSearchesStdinAlongsideRealRoots confirms "-" can be
+// mixed with real filesystem roots in the same Run: the walker gets
+// only the real root (stripped of "-"), while stdin is searched
+// concurrently as one more producer into the same writer queue.
+func TestOrchestratorSearchesStdinAlongsideRealRoots(t *testing.T) {
+	dir := t.TempDir()
+	writeFixture(t, filepath.Join(dir, "a.txt"), "hello from disk\n")
+
+	sink := newFakeSink()
+	orch := app.New(newTestRegistry(), walk.New(), match.NewFactory(), sink)
+	orch.Stdin = strings.NewReader("hello from stdin\n")
+	orch.StdinExtractor = text.Extractor{}
+
+	stats, err := orch.Run(context.Background(), "hello", []string{"-", dir}, domain.SearchOptions{})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if stats.TotalMatches != 2 {
+		t.Errorf("TotalMatches = %d, want 2", stats.TotalMatches)
+	}
+
+	var gotPaths []string
+	for _, m := range sink.matches {
+		gotPaths = append(gotPaths, m.Path)
+	}
+	sort.Strings(gotPaths)
+	want := []string{domain.StdinPath, filepath.Join(dir, "a.txt")}
+	sort.Strings(want)
+	if !reflect.DeepEqual(gotPaths, want) {
+		t.Errorf("match paths = %v, want %v", gotPaths, want)
+	}
+}
+
+// TestOrchestratorStdinHonorsTypeFilter confirms --type filtering
+// applies to stdin exactly like a real file: stdin is always searched
+// as "text" (see StreamExtractor's doc comment), so a --type that isn't
+// "text" must skip it, without counting it as searched.
+func TestOrchestratorStdinHonorsTypeFilter(t *testing.T) {
+	sink := newFakeSink()
+	orch := app.New(newTestRegistry(), walk.New(), match.NewFactory(), sink)
+	orch.Stdin = strings.NewReader("hello world\n")
+	orch.StdinExtractor = text.Extractor{}
+
+	stats, err := orch.Run(context.Background(), "hello", []string{"-"}, domain.SearchOptions{Types: []string{"docx"}})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if stats.FilesSearched != 0 {
+		t.Errorf("FilesSearched = %d, want 0 (stdin is \"text\", filtered out by --type docx)", stats.FilesSearched)
+	}
+	if stats.TotalMatches != 0 {
+		t.Errorf("TotalMatches = %d, want 0", stats.TotalMatches)
+	}
+}
+
+// TestOrchestratorStreamsStdinMatchesAsFound is stdin's counterpart to
+// TestOrchestratorStreamsMatchesAsFound: a match found on stdin must
+// reach the sink as soon as it's read, not only once stdin reaches EOF
+// -- confirming searchStdin's "genuine streaming, no full-input
+// buffering" design actually holds, not just that ExtractReader looks
+// like it would in isolation. An io.Pipe is used as orch.Stdin so the
+// test controls exactly when each line becomes available to read,
+// mirroring how gatedExtractor gates a file's units above.
+func TestOrchestratorStreamsStdinMatchesAsFound(t *testing.T) {
+	pr, pw := io.Pipe()
+
+	firstWrite := make(chan domain.Match, 1)
+	sink := newFakeSink()
+	sink.onWriteMatch = func(m domain.Match) {
+		select {
+		case firstWrite <- m:
+		default:
+		}
+	}
+
+	orch := app.New(newTestRegistry(), walk.New(), match.NewFactory(), sink)
+	orch.Stdin = pr
+	orch.StdinExtractor = text.Extractor{}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := orch.Run(context.Background(), "target", []string{"-"}, domain.SearchOptions{}); err != nil {
+			t.Errorf("Run() error = %v", err)
+		}
+	}()
+
+	if _, err := pw.Write([]byte("target one\n")); err != nil {
+		t.Fatalf("writing to pipe: %v", err)
+	}
+
+	select {
+	case m := <-firstWrite:
+		if m.Text != "target one" {
+			t.Errorf("first streamed match Text = %q, want %q", m.Text, "target one")
+		}
+	case <-done:
+		t.Fatal("Run finished before the first match was written -- streaming isn't happening")
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the first match to stream to the sink")
+	}
+
+	pw.Write([]byte("target two\n"))
+	pw.Close()
+	<-done
 }
 
 // TestOrchestratorContextLines exercises -A/-B/-C context-line

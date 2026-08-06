@@ -271,6 +271,56 @@ func TestTerminalWriteMatchNoHyperlinkWhenNotATTY(t *testing.T) {
 	}
 }
 
+// TestTerminalWriteMatchSuppressesHyperlinkForStdinPath confirms a
+// domain.StdinPath ("-") match never gets wrapped in an OSC 8 hyperlink,
+// even on a real terminal with a non-empty HyperlinkURI: there's no
+// real backing file for "-" to link to, so building one would only ever
+// point at something misleading.
+func TestTerminalWriteMatchSuppressesHyperlinkForStdinPath(t *testing.T) {
+	withFakeTTY(t)
+	var buf bytes.Buffer
+	term := NewTerminal(&buf, ColorNever, os.Stdout, SummaryModeOff)
+	match := domain.Match{
+		Path:     domain.StdinPath,
+		Location: testLocation{human: "line 3", fields: map[string]any{}, hyperlinkURI: "file:///cwd/-:3:1"},
+		Text:     "hello world",
+	}
+	if err := term.WriteMatch(match); err != nil {
+		t.Fatal(err)
+	}
+	if out := buf.String(); strings.Contains(out, "\x1b]8;;") {
+		t.Errorf("expected no hyperlink codes for stdin path, got %q", out)
+	}
+}
+
+// TestJSONWriteMatchEmptyURIForStdinPath is JSON's counterpart to
+// TestTerminalWriteMatchSuppressesHyperlinkForStdinPath: "uri" must be
+// "" for a domain.StdinPath match even when the Location's HyperlinkURI
+// would otherwise return something non-empty.
+func TestJSONWriteMatchEmptyURIForStdinPath(t *testing.T) {
+	var buf bytes.Buffer
+	sink := NewJSON(&buf)
+	match := domain.Match{
+		Path:     domain.StdinPath,
+		Format:   "text",
+		Location: testLocation{human: "3", fields: map[string]any{"line": 3}, hyperlinkURI: "file:///cwd/-:3:1"},
+		Text:     "hello world",
+	}
+	if err := sink.WriteMatch(match); err != nil {
+		t.Fatal(err)
+	}
+	var rec map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rec); err != nil {
+		t.Fatalf("output was not valid JSON: %v (%q)", err, buf.String())
+	}
+	if rec["path"] != domain.StdinPath {
+		t.Errorf("path = %v, want %q", rec["path"], domain.StdinPath)
+	}
+	if rec["uri"] != "" {
+		t.Errorf("uri = %v, want empty string for stdin path", rec["uri"])
+	}
+}
+
 func TestTerminalWriteMatchEscapesControlCharsInLocation(t *testing.T) {
 	var buf bytes.Buffer
 	term := NewTerminal(&buf, ColorNever, nil, SummaryModeOff)

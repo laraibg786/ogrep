@@ -129,7 +129,18 @@ func (Extractor) Sniff(path string, ra io.ReaderAt, size int64) bool {
 
 // Extract implements ports.DocumentExtractor, streaming the file one
 // line at a time.
-func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-chan domain.TextUnit, <-chan error) {
+func (e Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-chan domain.TextUnit, <-chan error) {
+	return e.ExtractReader(ctx, io.NewSectionReader(ra, 0, size))
+}
+
+// ExtractReader implements ports.StreamExtractor, streaming r one line
+// at a time. Extract itself is just this wrapped in an io.SectionReader
+// for the file case: the actual scan has never needed random access,
+// only Extract's io.ReaderAt/size signature (shared by every
+// DocumentExtractor, including the zip-based formats that genuinely
+// need it) did. That's what lets stdin -- a real io.Reader with no
+// known size and no ReadAt -- feed directly into the same scan.
+func (Extractor) ExtractReader(ctx context.Context, r io.Reader) (<-chan domain.TextUnit, <-chan error) {
 	units := make(chan domain.TextUnit, domain.TextUnitChannelBuffer)
 	errc := make(chan error, 1)
 
@@ -142,16 +153,15 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 		// Per the ports.DocumentExtractor contract, we convert it into
 		// an error on errc instead of letting it crash the process.
 		defer func() {
-			if r := recover(); r != nil {
+			if rec := recover(); rec != nil {
 				select {
-				case errc <- fmt.Errorf("panic during text extraction: %v", r):
+				case errc <- fmt.Errorf("panic during text extraction: %v", rec):
 				default:
 				}
 			}
 		}()
 
-		sr := io.NewSectionReader(ra, 0, size)
-		scanner := bufio.NewScanner(sr)
+		scanner := bufio.NewScanner(r)
 		scanner.Buffer(make([]byte, 0, 64*1024), maxLineSize)
 
 		lineNo := 0
