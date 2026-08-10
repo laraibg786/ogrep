@@ -39,7 +39,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"regexp"
 
 	"github.com/goccy/go-yaml/ast"
 	"github.com/goccy/go-yaml/parser"
@@ -71,9 +70,34 @@ func (Extractor) Name() string { return "yaml" }
 // Sniff (content inspection) is what actually decides.
 func (Extractor) Extensions() []string { return []string{".yaml", ".yml"} }
 
-// bareIdentRe matches a jq bare identifier: a leading letter or
-// underscore followed by letters, digits, or underscores.
-var bareIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// isBareIdent reports whether key is a jq bare identifier: a leading
+// letter or underscore followed by letters, digits, or underscores.
+// This is a hand-rolled equivalent of the regexp
+// `^[A-Za-z_][A-Za-z0-9_]*$` -- profiling showed regexp.MatchString was
+// this package's single largest self-inflicted CPU cost, since it runs
+// once per mapping key across the whole document. A manual byte loop
+// accepts and rejects exactly the same set of strings without the
+// regexp engine's per-call overhead.
+func isBareIdent(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c == '_':
+			// Valid in any position.
+		case c >= '0' && c <= '9':
+			// Valid, but not as the leading character.
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // jqSegment renders a single mapping-key path segment in jq/yq syntax.
 // Keys that are valid jq bare identifiers render as ".key"; everything
@@ -84,7 +108,7 @@ var bareIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // duplicates jsondoc's identical helper rather than sharing code across
 // packages, per the plan.
 func jqSegment(key string) string {
-	if bareIdentRe.MatchString(key) {
+	if isBareIdent(key) {
 		return "." + key
 	}
 	b, err := json.Marshal(key)
