@@ -24,7 +24,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"regexp"
 	"sort"
 
 	"github.com/laraibg786/ogrep/internal/core/domain"
@@ -59,9 +58,34 @@ var utf8BOM = []byte{0xEF, 0xBB, 0xBF}
 // keep the cheap trial decode in Sniff bounded.
 const sniffWindow = 4096
 
-// bareIdentRe matches a jq bare identifier: a leading letter or
-// underscore followed by letters, digits, or underscores.
-var bareIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// isBareIdent reports whether key is a jq bare identifier: a leading
+// letter or underscore followed by letters, digits, or underscores.
+// This is a hand-rolled equivalent of the regexp
+// `^[A-Za-z_][A-Za-z0-9_]*$` -- profiling showed regexp.MatchString was
+// this package's single largest self-inflicted CPU cost, since it runs
+// once per object key across the whole document. A manual byte loop
+// accepts and rejects exactly the same set of strings without the
+// regexp engine's per-call overhead.
+func isBareIdent(key string) bool {
+	if key == "" {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		switch {
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c == '_':
+			// Valid in any position.
+		case c >= '0' && c <= '9':
+			// Valid, but not as the leading character.
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
 
 // jqSegment renders a single object-key path segment in jq syntax. Keys
 // that are valid jq bare identifiers render as ".key"; everything else
@@ -70,7 +94,7 @@ var bareIdentRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // path can be pasted directly into jq without being misparsed (e.g. as
 // subtraction for a key like "foo-bar").
 func jqSegment(key string) string {
-	if bareIdentRe.MatchString(key) {
+	if isBareIdent(key) {
 		return "." + key
 	}
 	b, err := json.Marshal(key)
