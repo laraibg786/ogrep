@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"regexp"
@@ -212,8 +213,13 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 			// A cancelled/expired context is not a real extraction
 			// failure -- it means a consumer stopped early (e.g. -m 1
 			// on a huge file). Reporting that as a warning would be
-			// spurious noise on ordinary early exit.
-			if ctx.Err() == nil {
+			// spurious noise on ordinary early exit. Classify err
+			// itself (walk returns ctx.Err() verbatim from emit's
+			// <-ctx.Done() branch, never wrapped) rather than checking
+			// ctx.Err() after the fact, so a genuine decode error isn't
+			// swallowed just because the context also happened to be
+			// cancelled by then for an unrelated reason.
+			if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 				select {
 				case errc <- err:
 				default:
