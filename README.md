@@ -318,7 +318,4 @@ platform-specific compile break is worth catching before release time).
 
 ## License
 
-No `LICENSE` file has been added to this repository yet — that's a
-decision for the project owner to make. Until one exists, no license
-is granted for use, so treat this repository as "all rights reserved"
-by default.
+Apache License 2.0 — see [LICENSE](LICENSE).
