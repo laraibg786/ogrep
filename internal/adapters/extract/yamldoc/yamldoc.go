@@ -283,9 +283,15 @@ func (Extractor) Extract(ctx context.Context, ra io.ReaderAt, size int64) (<-cha
 				continue
 			}
 			if err := walk(ctx, doc.Body, root, emit); err != nil {
-				select {
-				case errc <- err:
-				default:
+				// A cancelled/expired context is not a real extraction
+				// failure -- it means a consumer stopped early (e.g. -m 1
+				// on a huge file). Reporting that as a warning would be
+				// spurious noise on ordinary early exit.
+				if ctx.Err() == nil {
+					select {
+					case errc <- err:
+					default:
+					}
 				}
 				return
 			}
