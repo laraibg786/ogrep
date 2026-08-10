@@ -47,8 +47,11 @@ func colLetters(col int) string {
 	var buf []byte
 	for col > 0 {
 		col--
-		buf = append([]byte{byte('A' + col%26)}, buf...)
+		buf = append(buf, byte('A'+col%26))
 		col /= 26
+	}
+	for i, j := 0, len(buf)-1; i < j; i, j = i+1, j-1 {
+		buf[i], buf[j] = buf[j], buf[i]
 	}
 	return string(buf)
 }
