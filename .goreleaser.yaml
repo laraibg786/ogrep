@@ -63,11 +63,10 @@ archives:
       # Glob patterns (as opposed to bare filenames) that match zero
       # files are silently skipped by goreleaser rather than failing
       # the build; a bare "LICENSE" with no glob metacharacter errors
-      # out if missing. LICENSE does not exist in this repo yet (see
-      # README/report) — the `LICENSE*` form here means the archive
-      # build keeps working today and starts picking it up
-      # automatically the day the maintainer adds one, with no config
-      # change required at that point.
+      # out if missing. Kept as a glob (rather than tightened to the
+      # literal "LICENSE" now that one exists) so the archive build
+      # doesn't start failing if the file is ever renamed/reformatted
+      # (e.g. LICENSE.txt, LICENSE.md).
       - README*
       - LICENSE*
 
